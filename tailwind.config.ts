@@ -59,7 +59,16 @@ export default {
   				'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
-  			}
+  			},
+        // Custom category colors
+        category: {
+          pdf: 'hsl(var(--category-pdf))',
+          image: 'hsl(var(--category-image))',
+          document: 'hsl(var(--category-document))',
+          audio: 'hsl(var(--category-audio))',
+          video: 'hsl(var(--category-video))',
+          other: 'hsl(var(--category-other))',
+        }
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
