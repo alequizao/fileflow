@@ -12,7 +12,7 @@ import {
   Trash2,
   Eye,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button'; // Keep buttonVariants import
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,15 +32,15 @@ interface FileItemProps {
   onDelete: (fileId: string) => void;
 }
 
-const getFileIcon = (type: FileType, colorClass: string) => {
+const getFileIcon = (file: UploadedFile, colorClass: string) => { // Pass the whole file object
   const commonClasses = cn("h-8 w-8 mr-3 shrink-0", colorClass);
-  switch (type) {
+  switch (file.type) {
     case 'pdf':
       return <FileText className={commonClasses} />;
     case 'image':
       return <ImageIcon className={commonClasses} />;
     case 'document':
-      return <FileText className={commonClasses} />;
+      return <FileText className={commonClasses} />; // Keep using FileText for documents
     case 'audio':
       return <FileAudio className={commonClasses} />;
     case 'video':
@@ -78,20 +78,26 @@ export function FileItem({ file, onDelete }: FileItemProps) {
 
   // Function to handle download click
   // This uses a temporary anchor element to trigger the download
-  // It assumes the `file.url` points to an endpoint that serves the file with correct headers
+  // It assumes the `file.url` points to an endpoint that serves the file with correct headers OR is a Blob URL
   const handleDownload = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault(); // Prevent default link navigation
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.setAttribute('download', file.name); // This attribute prompts download
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // For non-Blob URLs or URLs pointing to an API endpoint:
+    if (!file.url.startsWith('blob:')) {
+        e.preventDefault(); // Prevent default link navigation only if not a blob URL
+        const link = document.createElement('a');
+        link.href = file.url; // This should point to the API endpoint or direct file link
+        link.setAttribute('download', file.name); // This attribute prompts download
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+    // For blob URLs, the default anchor behavior is sufficient for download.
+    // No e.preventDefault() needed.
   };
 
   return (
     <li className="bg-card rounded-lg shadow-sm border p-3 flex items-center transition-colors hover:bg-muted/50">
-      {getFileIcon(file.type, colorClass)}
+      {/* Pass the file object to getFileIcon */}
+      {getFileIcon(file, colorClass)}
       <div className="flex-grow min-w-0 mr-4">
         <p className="font-medium text-sm truncate text-foreground" title={file.name}>
           {file.name}
@@ -103,13 +109,15 @@ export function FileItem({ file, onDelete }: FileItemProps) {
       <div className="flex gap-1 ml-auto">
          {/* View/Open Link - Opens in new tab */}
          <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:text-primary/80" asChild>
+          {/* Use file.url directly, target="_blank" opens in a new tab */}
           <a href={file.url} target="_blank" rel="noopener noreferrer" aria-label={`Abrir ${file.name}`}>
             <Eye className="h-4 w-4" />
           </a>
         </Button>
         {/* Download Link - Triggers download via handleDownload */}
         <Button variant="ghost" size="icon" className="h-8 w-8 text-accent hover:text-accent/80" asChild>
-           <a href={file.url} onClick={handleDownload} aria-label={`Baixar ${file.name}`}>
+           {/* Use file.url for the href, onClick handles the download logic */}
+           <a href={file.url} onClick={handleDownload} download={file.name} aria-label={`Baixar ${file.name}`}>
             <Download className="h-4 w-4" />
           </a>
         </Button>
@@ -129,6 +137,7 @@ export function FileItem({ file, onDelete }: FileItemProps) {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                {/* Apply destructive variant style to the action button */}
                 <AlertDialogAction onClick={() => onDelete(file.id)} className={buttonVariants({ variant: "destructive" })}>
                     Excluir
                 </AlertDialogAction>
@@ -141,11 +150,4 @@ export function FileItem({ file, onDelete }: FileItemProps) {
   );
 }
 
-// Need buttonVariants for Alert Dialog Action styling
-import { buttonVariants } from "@/components/ui/button";
-
-// Need file variable access inside getFileIcon for archive check
-let file: UploadedFile;
-export function setFileContext(f: UploadedFile) {
-  file = f;
-}
+// Removed unused setFileContext function and related code
