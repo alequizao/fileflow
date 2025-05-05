@@ -17,6 +17,16 @@ import { CodePreviewModal } from '@/components/modals/code-preview-modal';
 
 const LOCAL_STORAGE_KEY = 'fileflow-items';
 
+// Helper function to convert Data URL to Blob
+const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
+  const response = await fetch(dataUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch data URL: ${response.statusText}`);
+  }
+  return response.blob();
+};
+
+
 export default function Home() {
   const [items, setItems] = useState<FileSystemItem[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null); // null represents the root
@@ -27,7 +37,8 @@ export default function Home() {
   const [isCreateFolderModalOpen, setIsCreateFolderModalOpen] = useState(false);
   const [itemToRename, setItemToRename] = useState<FileSystemItem | null>(null);
   const [itemToShare, setItemToShare] = useState<FileSystemItem | null>(null);
-  const [itemToPreview, setItemToPreview] = useState<FileItemData | null>(null); // For image/code preview
+  // Ensure itemToPreview state can hold the extra previewContent property
+  const [itemToPreview, setItemToPreview] = useState<(FileItemData & { previewContent?: string }) | null>(null);
   const { toast } = useToast();
 
   // --- Local Storage Persistence ---
@@ -53,6 +64,18 @@ export default function Home() {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(items));
     }
   }, [items, isMounted]);
+
+    // --- Navigation Logic ---
+    const handleFolderClick = useCallback((folderId: string | null) => {
+        setCurrentFolderId(folderId);
+        setSearchQuery(''); // Reset search when changing folders
+        setFilterType('all'); // Reset filter
+      }, []); // No dependencies needed here as it only sets state
+
+      const navigateToRoot = useCallback(() => {
+        handleFolderClick(null); // Navigate to root
+      }, [handleFolderClick]); // Depends on handleFolderClick
+
 
   // --- Upload Logic ---
   const handleUpload = useCallback((files: FileList | File[]) => {
@@ -210,78 +233,60 @@ export default function Home() {
   }, [toast]);
 
   // --- Preview Logic ---
-   const handlePreview = useCallback(async (item: FileSystemItem) => {
-    if (isFile(item)) {
-      if (item.isUploading) {
-        toast({ title: "Aguarde", description: "O upload ainda está em andamento."});
-        return;
-      }
-      if (!item.url) {
-        toast({ title: "Erro", description: "URL do arquivo não encontrada.", variant: "destructive" });
-        return;
-      }
+  const handlePreview = useCallback(async (item: FileSystemItem) => {
+      console.log("Attempting to preview:", item); // Debug log 1
+      if (isFile(item)) {
+          if (item.isUploading) {
+              toast({ title: "Aguarde", description: "O upload ainda está em andamento." });
+              return;
+          }
+          if (!item.url || !item.url.startsWith('data:')) {
+              toast({ title: "Erro", description: "URL do arquivo inválida ou não encontrada.", variant: "destructive" });
+              console.error("Invalid or missing URL:", item.url); // Debug log
+              return;
+          }
 
-      if (item.fileCategory === 'image') {
-        setItemToPreview(item); // Opens ImagePreviewModal
-      } else if (item.fileCategory === 'code' || item.fileCategory === 'document' || item.fileCategory === 'pdf') {
-         // Data URLs are handled differently
-         if (item.url.startsWith('data:')) {
-           const mimeType = item.url.substring(item.url.indexOf(':') + 1, item.url.indexOf(';'));
-           const base64Data = item.url.substring(item.url.indexOf(',') + 1);
+          try {
+              if (item.fileCategory === 'image') {
+                  console.log("Setting image preview for:", item.name); // Debug log
+                  setItemToPreview(item); // Opens ImagePreviewModal
+              } else if (['code', 'document', 'pdf'].includes(item.fileCategory)) {
+                  const blob = await dataUrlToBlob(item.url); // Use helper function
 
-           try {
-             const byteCharacters = atob(base64Data);
-             const byteNumbers = new Array(byteCharacters.length);
-             for (let i = 0; i < byteCharacters.length; i++) {
-               byteNumbers[i] = byteCharacters.charCodeAt(i);
-             }
-             const byteArray = new Uint8Array(byteNumbers);
-             const blob = new Blob([byteArray], { type: mimeType });
-
-             if (item.fileCategory === 'pdf') {
-               const pdfUrl = URL.createObjectURL(blob);
-               window.open(pdfUrl, '_blank');
-               // Consider revoking the object URL later if needed
-               // setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
-               return; // Exit early for PDF
-             } else {
-               // For code/document, read blob as text
-               const text = await blob.text();
-               setItemToPreview({ ...item, previewContent: text } as FileItemData & { previewContent: string }); // Opens CodePreviewModal
-             }
-
-           } catch (error) {
-             console.error("Error processing data URL content:", error);
-             toast({ title: "Erro de Visualização", description: "Não foi possível carregar o conteúdo do arquivo.", variant: "destructive"});
-             // If direct processing fails, maybe still try opening the data URL directly
-             window.open(item.url, '_blank');
-           }
-
-         } else {
-           // If it's not a data URL (e.g., a direct link - unlikely with current setup), try opening directly
-           window.open(item.url, '_blank');
-         }
+                  if (item.fileCategory === 'pdf') {
+                      const pdfUrl = URL.createObjectURL(blob);
+                      window.open(pdfUrl, '_blank');
+                      // Optional: Revoke URL after some time
+                      // setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+                  } else { // Code or Document
+                      const text = await blob.text();
+                      console.log("Setting text preview for:", item.name); // Debug log
+                      setItemToPreview({ ...item, previewContent: text }); // Add content and open CodePreviewModal
+                  }
+              } else { // Audio, Video, Other - attempt direct open/download
+                  window.open(item.url, '_blank');
+              }
+          } catch (error) {
+              console.error("Erro ao processar visualização:", error);
+              toast({
+                  title: "Erro de Visualização",
+                  description: "Não foi possível carregar o conteúdo do arquivo.",
+                  variant: "destructive"
+              });
+              // Fallback: Try opening the data URL directly, though it might not work well for all types
+              try {
+                window.open(item.url, '_blank');
+              } catch (openError) {
+                console.error("Error opening data URL directly:", openError);
+              }
+          }
+      } else if (isFolder(item)) {
+          // Handle folder click (navigation)
+          handleFolderClick(item.id);
       } else {
-        // For other types (audio, video, other), attempt to open/download
-        window.open(item.url, '_blank');
+          console.warn("Preview attempted on unknown item type:", item); // Debug log
       }
-    } else {
-      // Handle folder click (navigation)
-      handleFolderClick(item.id);
-    }
-  }, [toast]); // Added handleFolderClick dependency implicitly
-
-  // --- Navigation Logic ---
-  const handleFolderClick = (folderId: string | null) => {
-    setCurrentFolderId(folderId);
-    setSearchQuery(''); // Reset search when changing folders
-    setFilterType('all'); // Reset filter
-  };
-
-  const navigateToRoot = () => {
-    handleFolderClick(null); // Navigate to root
-  };
-
+  }, [toast, handleFolderClick]); // Added handleFolderClick dependency
 
   // --- Drag and Drop Logic ---
   const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -351,6 +356,12 @@ export default function Home() {
     }
     return path.reverse();
   }, [items, currentFolderId]);
+
+  // Debug log to check itemToPreview state changes
+   useEffect(() => {
+     console.log("itemToPreview state updated:", itemToPreview);
+   }, [itemToPreview]);
+
 
   return (
     <div
@@ -422,15 +433,19 @@ export default function Home() {
               onConfirmShare={handleShare} // Use the simplified mock share handler
           />
        )}
-       {itemToPreview && isFile(itemToPreview) && itemToPreview.fileCategory === 'image' && (
-          <ImagePreviewModal
-            isOpen={!!itemToPreview}
-            onClose={() => setItemToPreview(null)}
-            imageUrl={itemToPreview.url}
-            altText={itemToPreview.name}
-          />
-       )}
-       {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && typeof itemToPreview.previewContent === 'string' && (
+
+       {/* Conditional rendering for Image Preview Modal */}
+        {itemToPreview && isFile(itemToPreview) && itemToPreview.fileCategory === 'image' && (
+            <ImagePreviewModal
+                isOpen={!!itemToPreview}
+                onClose={() => setItemToPreview(null)}
+                imageUrl={itemToPreview.url}
+                altText={itemToPreview.name}
+            />
+        )}
+
+        {/* Conditional rendering for Code/Document Preview Modal */}
+        {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && typeof itemToPreview.previewContent === 'string' && (
             <CodePreviewModal
                 isOpen={!!itemToPreview}
                 onClose={() => setItemToPreview(null)}
