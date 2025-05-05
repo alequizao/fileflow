@@ -1,14 +1,15 @@
 
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google'; // Using Inter as a modern sans-serif font
+import { Inter } from 'next/font/google';
 import './globals.css';
-import { Toaster } from "@/components/ui/toaster" // Import Toaster
+import { Toaster } from "@/components/ui/toaster";
+import { ThemeProvider } from "@/components/theme-provider"; // Import ThemeProvider
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
-  title: 'FileFlow', // Updated title
-  description: 'Gerenciador de arquivos simples e moderno', // Updated description
+  title: 'FileFlow',
+  description: 'Gerenciador de arquivos simples e moderno',
 };
 
 export default function RootLayout({
@@ -17,13 +18,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // Set language to Portuguese
-    <html lang="pt-BR">
-      <body className={`${inter.variable} font-sans antialiased`}> {/* Use Inter font */}
-        {children}
-        <Toaster /> {/* Add Toaster here */}
+    <html lang="pt-BR" suppressHydrationWarning> {/* Add suppressHydrationWarning for next-themes */}
+      <body className={`${inter.variable} font-sans antialiased`}>
+        <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+        >
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );
 }
-

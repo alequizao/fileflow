@@ -1,9 +1,10 @@
 
+
 'use client';
 
 import React from 'react';
 import {
-  FileText, ImageIcon, FileAudio, FileVideo, FileCode2, FileArchive, FileQuestion, Folder, Download, Trash2, Eye, MoreVertical, Edit, Share2, Copy, UploadCloud, FileCode, FileJson, Database, Terminal, BrainCircuit, FileCog, FileSpreadsheet, FileImage, FileType // Added more specific icons
+  FileText, ImageIcon, FileAudio, FileVideo, FileCode2, FileArchive, FileQuestion, Folder, Download, Trash2, Eye, MoreVertical, Edit, Share2, Copy, UploadCloud, FileCode, FileJson, Database, Terminal, BrainCircuit, FileCog, FileSpreadsheet, FileImage, FileType, Star, RotateCcw, Trash // Added more specific icons
 } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -17,24 +18,34 @@ import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { FileSystemItem, FileItemData, FolderItemData } from '@/types/file';
-import { isFile, isFolder, formatBytes } from '@/types/file';
+import { isFile, isFolder, formatBytes, dataUrlToBlob } from '@/types/file';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 
 interface FileItemProps {
   item: FileSystemItem;
-  onDelete: (itemId: string) => void;
-  onFolderClick: (folderId: string | null) => void; // Allow null for root navigation
+  onDelete: (itemId: string) => void; // Moves to trash
+  onFolderClick: (folderId: string) => void;
   onRename: (item: FileSystemItem) => void;
   onShare: (item: FileSystemItem) => void;
   onPreview: (item: FileSystemItem) => void;
+  onContextMenu: (event: React.MouseEvent, item: FileSystemItem) => void; // Context menu
+  onToggleFavorite: (itemId: string) => void; // Toggle favorite
+  isSelected: boolean; // Is the item currently selected?
+  onSelect: (itemId: string, isShiftKey: boolean, isCtrlKey: boolean) => void; // Selection handler
+  isDropTarget: boolean; // Is this folder currently the drop target?
+  isTrashView?: boolean; // Are we viewing the trash?
+  onDeletePermanently?: (itemId: string) => void; // Delete permanently from trash
+  onRestore?: (itemId: string) => void; // Restore from trash
 }
 
 // --- Icon and Color Logic ---
 const getItemIcon = (item: FileSystemItem) => {
     const commonClasses = "h-8 w-8 mr-3 shrink-0";
+    const favoriteClass = item.isFavorite ? "text-yellow-400 fill-yellow-400" : "text-yellow-500"; // Style for favorite folders
+
     if (isFolder(item)) {
-        return <Folder className={cn(commonClasses, "text-yellow-500")} />;
+        return <Folder className={cn(commonClasses, favoriteClass)} />;
     }
 
     // File specific icons based on category and extension
@@ -45,6 +56,7 @@ const getItemIcon = (item: FileSystemItem) => {
             if (/\.(docx?)$/i.test(item.name)) return <FileText className={cn(commonClasses, "text-blue-600")} />;
             if (/\.(xlsx?|csv)$/i.test(item.name)) return <FileSpreadsheet className={cn(commonClasses, "text-green-600")} />; // Spreadsheet icon
             if (/\.(pptx?)$/i.test(item.name)) return <FileText className={cn(commonClasses, "text-orange-500")} />; // Presentation-like color
+            if (/\.(md)$/i.test(item.name)) return <FileCode className={cn(commonClasses, "text-gray-500")} />; // Markdown icon
             return <FileText className={cn(commonClasses, "text-gray-500")} />; // Generic document
         case 'audio': return <FileAudio className={cn(commonClasses, "text-orange-400")} />;
         case 'video': return <FileVideo className={cn(commonClasses, "text-purple-500")} />;
@@ -69,95 +81,152 @@ const getItemIcon = (item: FileSystemItem) => {
 
 
 // --- Main Component ---
-export function FileItem({ item, onDelete, onFolderClick, onRename, onShare, onPreview }: FileItemProps) {
+export function FileItem({
+    item,
+    onDelete,
+    onFolderClick,
+    onRename,
+    onShare,
+    onPreview,
+    onContextMenu,
+    onToggleFavorite,
+    isSelected,
+    onSelect,
+    isDropTarget,
+    isTrashView = false,
+    onDeletePermanently,
+    onRestore,
+ }: FileItemProps) {
   const { toast } = useToast();
 
   const handleItemClick = (e: React.MouseEvent) => {
-    // Prevent triggering folder navigation or preview when clicking buttons/menu inside
-    if ((e.target as HTMLElement).closest('button, [role="menuitem"], [role="menu"], [data-radix-dropdown-menu-trigger]')) {
-        e.stopPropagation(); // Stop propagation if click is on interactive elements
-        return;
-    }
-    if (isFolder(item)) {
-      onFolderClick(item.id);
-    } else {
-      handlePreviewAction(e); // Default click on file triggers preview
-    }
+      const isActionButton = (e.target as HTMLElement).closest('button, [role="menuitem"], [role="menu"], [data-radix-dropdown-menu-trigger], [data-alert-dialog-trigger]');
+
+      // Always handle selection first
+       if (!isActionButton) { // Don't trigger selection change when clicking actions
+          onSelect(item.id, e.shiftKey, e.ctrlKey || e.metaKey); // Pass modifier keys
+       }
+
+      // Prevent default actions if clicking on buttons/menus
+      if (isActionButton) {
+          e.stopPropagation();
+          return;
+      }
+
+      // If not clicking an action button, proceed with default behavior (open folder/preview file)
+      // Only trigger folder navigation or preview on single click if it's NOT a selection action
+       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+            if (isFolder(item)) {
+                onFolderClick(item.id);
+            } else if (!isTrashView) { // Don't preview items in trash by default click
+                 handlePreviewAction(e);
+            }
+       }
   };
 
+    const handleDoubleClick = (e: React.MouseEvent) => {
+         e.stopPropagation(); // Prevent single click behavior
+         if (isFolder(item)) {
+             onFolderClick(item.id);
+         } else if (!isTrashView) { // Don't preview items in trash on double click either
+             handlePreviewAction(e);
+         }
+     };
+
+
   // --- Action Handlers ---
-   const handlePreviewAction = (e?: React.MouseEvent) => {
+   const handlePreviewAction = (e?: React.MouseEvent | React.KeyboardEvent) => {
     e?.stopPropagation();
+    if (isTrashView) {
+        toast({ title: "Ação Indisponível", description: "Não é possível visualizar itens na lixeira.", variant:"default" });
+        return;
+    }
     onPreview(item);
   };
 
-  const handleDownloadAction = (e: React.MouseEvent) => {
+  const handleDownloadAction = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation();
-    if (isFile(item)) {
-      if (item.isUploading || !item.url) {
-         toast({ title: "Indisponível", description: "O download não está disponível para este arquivo.", variant: "destructive"});
+     if (isTrashView) {
+         toast({ title: "Ação Indisponível", description: "Não é possível baixar itens da lixeira.", variant:"default" });
          return;
-      }
-
-       // If it's a data URL, create a blob and download link
-       if (item.url.startsWith('data:')) {
-           try {
-               const mimeType = item.url.substring(item.url.indexOf(':') + 1, item.url.indexOf(';'));
-               const base64Data = item.url.substring(item.url.indexOf(',') + 1);
-               const byteCharacters = atob(base64Data);
-               const byteNumbers = new Array(byteCharacters.length);
-               for (let i = 0; i < byteCharacters.length; i++) {
-                   byteNumbers[i] = byteCharacters.charCodeAt(i);
-               }
-               const byteArray = new Uint8Array(byteNumbers);
-               const blob = new Blob([byteArray], { type: mimeType });
-               const blobUrl = URL.createObjectURL(blob);
-
-               const link = document.createElement('a');
-               link.href = blobUrl;
-               link.setAttribute('download', item.name);
-               document.body.appendChild(link);
-               link.click();
-               document.body.removeChild(link);
-               URL.revokeObjectURL(blobUrl); // Clean up blob URL
-               toast({ title: "Download Iniciado", description: `"${item.name}" está sendo baixado.` });
-           } catch (error) {
-               console.error("Error creating download link from data URL:", error);
-               toast({ title: "Erro de Download", description: "Não foi possível iniciar o download.", variant: "destructive"});
-           }
-       } else {
-           // If it's a regular URL (less likely now, but handle anyway)
-           const link = document.createElement('a');
-           link.href = item.url;
-           link.setAttribute('download', item.name);
-           document.body.appendChild(link);
-           link.click();
-           document.body.removeChild(link);
-           toast({ title: "Download Iniciado", description: `"${item.name}" está sendo baixado.` });
+     }
+    if (isFile(item)) {
+       if (item.isUploading || typeof item.content === 'undefined') {
+           toast({ title: "Indisponível", description: "O download não está disponível para este arquivo.", variant: "destructive"});
+           return;
        }
+
+        try {
+             let blob: Blob;
+             if (typeof item.content === 'string' && item.content.startsWith('data:')) {
+                 // Content is Data URL
+                  blob = dataUrlToBlob(item.content);
+             } else if (typeof item.content === 'string') {
+                  // Content is plain text
+                  blob = new Blob([item.content], { type: item.mimeType || 'text/plain' });
+             } else {
+                  throw new Error("Formato de conteúdo inválido para download.");
+             }
+
+             const blobUrl = URL.createObjectURL(blob);
+             const link = document.createElement('a');
+             link.href = blobUrl;
+             link.setAttribute('download', item.name);
+             document.body.appendChild(link);
+             link.click();
+             document.body.removeChild(link);
+             URL.revokeObjectURL(blobUrl); // Clean up blob URL
+             toast({ title: "Download Iniciado", description: `"${item.name}" está sendo baixado.` });
+
+         } catch (error) {
+             console.error("Erro ao criar link de download:", error);
+             toast({ title: "Erro de Download", description: `Não foi possível iniciar o download. ${error instanceof Error ? error.message : ''}`, variant: "destructive"});
+         }
 
     } else {
       toast({ title: "Ação Inválida", description: "Não é possível baixar uma pasta.", variant: "destructive" });
     }
   };
 
-   const handleRenameAction = (e: React.MouseEvent) => {
+   const handleRenameAction = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation();
+     if (isTrashView) {
+         toast({ title: "Ação Indisponível", description: "Não é possível renomear itens na lixeira.", variant:"default" });
+         return;
+     }
     onRename(item);
   };
 
-  const handleShareAction = (e: React.MouseEvent) => {
+  const handleShareAction = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation();
+     if (isTrashView) {
+         toast({ title: "Ação Indisponível", description: "Não é possível compartilhar itens da lixeira.", variant:"default" });
+         return;
+     }
     onShare(item);
   };
 
-  const handleCopyLinkAction = (e: React.MouseEvent) => {
+   const handleToggleFavoriteAction = (e: React.MouseEvent | React.KeyboardEvent) => {
+       e.stopPropagation();
+        if (isTrashView) {
+            toast({ title: "Ação Indisponível", description: "Não é possível favoritar itens na lixeira.", variant:"default" });
+            return;
+        }
+       onToggleFavorite(item.id);
+   };
+
+
+  const handleCopyLinkAction = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation();
-    if (isFile(item) && item.url && !item.isUploading) {
-        // In a real app, this would be a persistent shareable link, not a data URL
-        const linkToCopy = item.url.startsWith('data:') ? `(Link de dados para ${item.name})` : item.url;
+     if (isTrashView) {
+         toast({ title: "Ação Indisponível", description: "Não é possível copiar link de itens na lixeira.", variant:"default" });
+         return;
+     }
+    if (isFile(item) && typeof item.content !== 'undefined' && !item.isUploading) {
+        // Mock link - In real app, generate a persistent shareable link
+        const linkToCopy = `${window.location.origin}/shared/${item.id}`; // Example
          navigator.clipboard.writeText(linkToCopy).then(() => {
-             toast({ title: "Link Copiado!", description: `Link para "${item.name}" copiado.` });
+             toast({ title: "Link Copiado!", description: `Link simulado para "${item.name}" copiado.` });
          }).catch(err => {
              toast({ title: "Erro", description: "Não foi possível copiar o link.", variant: "destructive" });
              console.error("Failed to copy link:", err);
@@ -167,11 +236,30 @@ export function FileItem({ item, onDelete, onFolderClick, onRename, onShare, onP
     }
   };
 
+  const handleDeleteTrigger = (e: React.MouseEvent | React.KeyboardEvent) => {
+      e.stopPropagation(); // Prevent item click/selection
+      // The AlertDialog component handles the rest
+  };
 
-  // handleDeleteAction is implicitly handled by AlertDialog confirmation below
+  const handleConfirmDelete = () => {
+       if (isTrashView && onDeletePermanently) {
+           onDeletePermanently(item.id);
+       } else {
+           onDelete(item.id); // Move to trash
+       }
+   };
+
+    const handleRestoreAction = (e: React.MouseEvent | React.KeyboardEvent) => {
+        e.stopPropagation();
+        if (isTrashView && onRestore) {
+            onRestore(item.id);
+        }
+    };
+
 
   const isUploadingFile = isFile(item) && item.isUploading;
   const uploadProgress = isUploadingFile ? item.uploadProgress ?? 0 : 100;
+  const hasError = isFile(item) && !!item.error;
 
   // Tooltip wrapper function
   const withTooltip = (content: React.ReactNode, tooltipText: string) => (
@@ -188,21 +276,74 @@ export function FileItem({ item, onDelete, onFolderClick, onRename, onShare, onP
   return (
     <li
       className={cn(
-        "bg-card rounded-lg shadow-sm border p-3 flex items-center transition-all duration-150 hover:shadow-md hover:border-primary/50 relative group",
-        isFolder(item) ? 'cursor-pointer' : '',
-        isUploadingFile ? 'opacity-70 pointer-events-none' : '' // Disable interactions while uploading
+        "bg-card rounded-lg shadow-sm border p-3 flex items-center transition-all duration-150 relative group",
+        "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:border-transparent outline-none", // Focus styling
+        isFolder(item) ? 'cursor-pointer' : '', // Make folders explicitly clickable
+        isUploadingFile ? 'opacity-70 pointer-events-none' : '', // Disable interactions while uploading
+        hasError ? 'border-destructive/50 bg-destructive/5' : 'hover:shadow-md hover:border-primary/50', // Error state styling
+        // Selection styling
+         isSelected ? 'bg-primary/10 border-primary shadow-md' : '',
+         // Drop target styling
+         isDropTarget ? 'border-dashed border-2 border-primary bg-primary/5 scale-[1.01]' : ''
       )}
       onClick={handleItemClick}
+      onDoubleClick={handleDoubleClick}
+      onContextMenu={(e) => onContextMenu(e, item)}
+      tabIndex={0} // Make list item focusable
+      aria-selected={isSelected}
+      data-item-id={item.id}
+      data-folder-id={isFolder(item) ? item.id : undefined} // Add data attribute for drop target identification
+      data-selected={isSelected} // Data attribute for easier CSS targeting if needed
+      data-drop-target={isDropTarget}
+      onKeyDown={(e) => {
+           if (e.key === 'Enter' || e.key === ' ') {
+               e.preventDefault(); // Prevent default space scroll
+               handleItemClick(e as any); // Treat Enter/Space as a click for selection/action
+           }
+            // Add keyboard shortcuts for actions? e.g., Delete key
+            if (e.key === 'Delete' && !isUploadingFile) {
+                 e.stopPropagation();
+                 handleDeleteTrigger(e);
+                 // Find and click the AlertDialogTrigger programmatically? Or open the dialog directly.
+                 // This requires a ref or more complex logic. For simplicity, maybe just log for now.
+                  console.log("Delete key pressed for:", item.name);
+            }
+      }}
     >
       {/* Item Icon */}
       {getItemIcon(item)}
+       {/* Favorite Star (Absolute position top-right) */}
+        {!isTrashView && !isUploadingFile && (
+             <TooltipProvider delayDuration={100}>
+                 <Tooltip>
+                     <TooltipTrigger asChild>
+                         <Button
+                             variant="ghost"
+                             size="icon"
+                             className={cn(
+                                 "absolute top-1 right-1 h-6 w-6 p-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity hover:text-yellow-500",
+                                 item.isFavorite ? "opacity-100 text-yellow-400 fill-yellow-400 hover:text-yellow-500" : ""
+                             )}
+                             onClick={handleToggleFavoriteAction}
+                             aria-label={item.isFavorite ? "Remover dos Favoritos" : "Adicionar aos Favoritos"}
+                         >
+                             <Star className="h-4 w-4" />
+                         </Button>
+                     </TooltipTrigger>
+                     <TooltipContent side="top">
+                         <p>{item.isFavorite ? "Remover dos Favoritos" : "Adicionar aos Favoritos"}</p>
+                     </TooltipContent>
+                 </Tooltip>
+             </TooltipProvider>
+        )}
+
 
        {/* Item Info & Progress */}
        <div className="flex-grow min-w-0 mr-4">
          <p className="font-medium text-sm truncate text-foreground" title={item.name}>
            {item.name}
          </p>
-         {isFile(item) && !isUploadingFile && (
+         {isFile(item) && !isUploadingFile && !hasError && (
            <p className="text-xs text-muted-foreground">
              {formatBytes(item.size)} &bull; {new Date(item.updatedAt).toLocaleDateString('pt-BR')}
            </p>
@@ -214,123 +355,182 @@ export function FileItem({ item, onDelete, onFolderClick, onRename, onShare, onP
            )}
          {isUploadingFile && (
            <div className="mt-1">
-             <Progress value={uploadProgress} className="h-1 w-full" />
+             <Progress value={uploadProgress} className="h-1 w-full" aria-label={`Progresso do upload ${uploadProgress}%`} />
              <p className="text-xs text-muted-foreground mt-0.5">
                Enviando... {uploadProgress.toFixed(0)}%
-               {/* Optional: Show error inline */}
-               {/* {item.error && <span className="text-destructive ml-2">Erro: {item.error}</span>} */}
             </p>
            </div>
          )}
+          {hasError && isFile(item) && (
+             <p className="text-xs text-destructive mt-1 truncate" title={item.error}>
+               Falha no upload: {item.error}
+             </p>
+          )}
+           {isTrashView && (
+               <p className="text-xs text-muted-foreground italic mt-0.5">
+                   Na lixeira - Atualizado em: {new Date(item.updatedAt).toLocaleDateString('pt-BR')}
+               </p>
+           )}
        </div>
 
 
-      {/* Action Buttons & Menu (only show if not uploading) */}
-       {!isUploadingFile && (
-        <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+      {/* Action Buttons & Menu (only show if not uploading and no error) */}
+       {!isUploadingFile && !hasError && (
+        <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-data-[selected=true]:opacity-100 transition-opacity duration-150">
 
-          {/* Individual Action Buttons (visible on hover) */}
-          {isFile(item) && withTooltip(
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={handlePreviewAction}>
-                  <Eye className="h-4 w-4" />
-              </Button>,
-              "Visualizar"
-          )}
-          {isFile(item) && withTooltip(
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-accent" onClick={handleDownloadAction}>
-                  <Download className="h-4 w-4" />
-              </Button>,
-               "Baixar"
-          )}
-
-          {/* Alert Dialog for Delete Confirmation */}
-          <AlertDialog>
-            {withTooltip(
-                 <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={(e) => e.stopPropagation()}>
-                          <Trash2 className="h-4 w-4" />
-                      </Button>
-                 </AlertDialogTrigger>,
-                  "Excluir"
-             )}
-             <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
-                    <AlertDialogDescription>
-                        Tem certeza que deseja excluir "{item.name}"? {isFolder(item) ? 'Todo o conteúdo dentro desta pasta também será excluído.' : ''} Esta ação não pode ser desfeita.
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => onDelete(item.id)} className={buttonVariants({ variant: "destructive" })}>
-                        Excluir
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-             </AlertDialogContent>
-          </AlertDialog>
-
-
-          {/* More Options Dropdown */}
-          <DropdownMenu>
-              <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                      <TooltipTrigger asChild>
-                           <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={e => e.stopPropagation()}>
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                          </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                          <p>Mais opções</p>
-                      </TooltipContent>
-                  </Tooltip>
-              </TooltipProvider>
-
-              <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48">
-                <DropdownMenuItem onClick={handleRenameAction}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  <span>Renomear</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleShareAction}>
-                  <Share2 className="mr-2 h-4 w-4" />
-                  <span>Compartilhar</span>
-                </DropdownMenuItem>
-                 {isFile(item) && (
-                   <DropdownMenuItem onClick={handleCopyLinkAction}>
-                     <Copy className="mr-2 h-4 w-4" />
-                     <span>Copiar Link</span>
-                   </DropdownMenuItem>
-                 )}
-                <DropdownMenuSeparator />
-                {/* Delete option within the dropdown triggers the same AlertDialog */}
-                <AlertDialog>
-                     <AlertDialogTrigger asChild>
-                          <DropdownMenuItem
-                              onSelect={(e) => e.preventDefault()} // Prevent closing dropdown immediately
-                              className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                           >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              <span>Excluir</span>
-                          </DropdownMenuItem>
-                     </AlertDialogTrigger>
+            {/* Trash View Actions */}
+             {isTrashView && onRestore && onDeletePermanently && (
+                <>
+                  {withTooltip(
+                       <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={handleRestoreAction}>
+                           <RotateCcw className="h-4 w-4" />
+                       </Button>,
+                       "Restaurar"
+                   )}
+                  <AlertDialog>
+                     {withTooltip(
+                         <AlertDialogTrigger asChild>
+                             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={handleDeleteTrigger} data-alert-dialog-trigger>
+                                 <Trash className="h-4 w-4" />
+                             </Button>
+                         </AlertDialogTrigger>,
+                         "Excluir Permanentemente"
+                     )}
                      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-                         <AlertDialogHeader>
-                             <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
-                             <AlertDialogDescription>
-                                 Tem certeza que deseja excluir "{item.name}"? {isFolder(item) ? 'Todo o conteúdo dentro desta pasta também será excluído.' : ''} Esta ação não pode ser desfeita.
-                             </AlertDialogDescription>
-                         </AlertDialogHeader>
-                         <AlertDialogFooter>
-                             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                             <AlertDialogAction onClick={() => onDelete(item.id)} className={buttonVariants({ variant: "destructive" })}>
-                                 Excluir
-                             </AlertDialogAction>
-                         </AlertDialogFooter>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Confirmar Exclusão Permanente</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Tem certeza que deseja excluir "{item.name}" permanentemente? {isFolder(item) ? 'Todo o conteúdo dentro desta pasta também será excluído.' : ''} Esta ação não pode ser desfeita.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleConfirmDelete} className={buttonVariants({ variant: "destructive" })}>
+                                Excluir Permanentemente
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
                      </AlertDialogContent>
-                 </AlertDialog>
-              </DropdownMenuContent>
-          </DropdownMenu>
+                  </AlertDialog>
+                </>
+             )}
+
+            {/* Regular View Actions */}
+           {!isTrashView && (
+               <>
+                    {/* Individual Action Buttons (visible on hover/selection) */}
+                    {isFile(item) && withTooltip(
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={handlePreviewAction}>
+                            <Eye className="h-4 w-4" />
+                        </Button>,
+                        "Visualizar"
+                    )}
+                    {isFile(item) && withTooltip(
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-accent" onClick={handleDownloadAction}>
+                            <Download className="h-4 w-4" />
+                        </Button>,
+                        "Baixar"
+                    )}
+
+                    {/* Alert Dialog for Move to Trash Confirmation */}
+                    <AlertDialog>
+                        {withTooltip(
+                            <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={handleDeleteTrigger} data-alert-dialog-trigger>
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            </AlertDialogTrigger>,
+                            "Mover para Lixeira"
+                        )}
+                        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Mover para Lixeira</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Tem certeza que deseja mover "{item.name}" para a lixeira? {isFolder(item) ? 'Todo o conteúdo dentro desta pasta também será movido.' : ''}
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleConfirmDelete} className={buttonVariants({ variant: "destructive" })}>
+                                    Mover para Lixeira
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+
+                    {/* More Options Dropdown */}
+                    <DropdownMenu>
+                        <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={e => e.stopPropagation()}>
+                                            <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Mais opções</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+
+                        <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48">
+                             {/* Add Favorite action */}
+                             <DropdownMenuItem onClick={handleToggleFavoriteAction}>
+                                 <Star className={cn("mr-2 h-4 w-4", item.isFavorite ? "text-yellow-500 fill-yellow-400" : "")} />
+                                 <span>{item.isFavorite ? "Remover Favorito" : "Adicionar Favorito"}</span>
+                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={handleRenameAction}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                <span>Renomear</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={handleShareAction}>
+                                <Share2 className="mr-2 h-4 w-4" />
+                                <span>Compartilhar</span>
+                            </DropdownMenuItem>
+                            {isFile(item) && (
+                                <DropdownMenuItem onClick={handleCopyLinkAction}>
+                                    <Copy className="mr-2 h-4 w-4" />
+                                    <span>Copiar Link</span>
+                                </DropdownMenuItem>
+                            )}
+                             {isFile(item) && ( // Add Download to dropdown as well
+                                 <DropdownMenuItem onClick={handleDownloadAction}>
+                                     <Download className="mr-2 h-4 w-4" />
+                                     <span>Baixar</span>
+                                 </DropdownMenuItem>
+                             )}
+                            <DropdownMenuSeparator />
+                            {/* Delete option within the dropdown triggers the same AlertDialog */}
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem
+                                        onSelect={(e) => e.preventDefault()} // Prevent closing dropdown immediately
+                                        className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                    >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        <span>Mover para Lixeira</span>
+                                    </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                                    <AlertDialogHeader>
+                                         <AlertDialogTitle>Mover para Lixeira</AlertDialogTitle>
+                                         <AlertDialogDescription>
+                                             Tem certeza que deseja mover "{item.name}" para a lixeira? {isFolder(item) ? 'Todo o conteúdo dentro desta pasta também será movido.' : ''}
+                                         </AlertDialogDescription>
+                                     </AlertDialogHeader>
+                                     <AlertDialogFooter>
+                                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                         <AlertDialogAction onClick={handleConfirmDelete} className={buttonVariants({ variant: "destructive" })}>
+                                             Mover para Lixeira
+                                         </AlertDialogAction>
+                                     </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+               </>
+           )}
         </div>
       )}
        {isUploadingFile && (

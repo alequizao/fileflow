@@ -11,18 +11,20 @@ export interface BaseItem {
   createdAt: string; // ISO string format for date created
   updatedAt: string; // ISO string format for date updated
   type: 'file' | 'folder'; // Type discriminator
+  isFavorite?: boolean; // Optional: Flag for favorite items
 }
 
 // Extend BaseItem for Files
 export interface FileItemData extends BaseItem {
   type: 'file';
-  url: string; // Data URL (or potentially other URL in the future)
+  // url: string; // Data URL (or potentially other URL in the future)
+  content?: string; // Store content as base64 string or text directly
   size: number; // Size in bytes
+  mimeType?: string; // Store the MIME type
   fileCategory: FileCategory; // Specific category of the file
   uploadProgress?: number; // Optional: 0-100 for upload progress
   isUploading?: boolean; // Optional: Flag during upload
   error?: string; // Optional: Upload error message
-  previewContent?: string; // Optional: Holds text content for code/doc preview
 }
 
 // Extend BaseItem for Folders
@@ -99,3 +101,80 @@ export function determineFileCategory(file: File): FileCategory {
     // Fallback
     return 'other';
 }
+
+// Function to convert Data URL to Blob (remains client-side only)
+export const dataUrlToBlob = (dataUrl: string): Blob => {
+    if (!dataUrl.startsWith('data:')) {
+        throw new Error('Invalid Data URL');
+    }
+    const parts = dataUrl.split(','); // Split at the first comma
+    if (parts.length !== 2) {
+        throw new Error('Invalid Data URL format');
+    }
+    const metaPart = parts[0]; // e.g., "data:image/png;base64"
+    const base64Data = parts[1];
+
+    const metaParts = metaPart.split(';');
+    if (metaParts.length < 1) {
+        throw new Error('Invalid Data URL metadata');
+    }
+    const contentType = metaParts[0].split(':')[1];
+    if (!contentType) {
+        throw new Error('Could not determine content type from Data URL');
+    }
+
+    // Check if base64 encoded
+    const isBase64 = metaParts.includes('base64');
+    let byteCharacters: string;
+
+    if (isBase64) {
+        try {
+            byteCharacters = atob(base64Data);
+        } catch (e) {
+            console.error("Failed to decode base64 string:", e);
+            throw new Error('Invalid base64 data in Data URL');
+        }
+    } else {
+        // Handle URL-encoded data
+        byteCharacters = decodeURIComponent(base64Data);
+    }
+
+
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: contentType });
+};
+
+// Function to read file content (handles text and base64 data URLs)
+export const readFileContent = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (event.target?.result) {
+                resolve(event.target.result as string); // Returns Data URL (includes base64) or text content
+            } else {
+                reject(new Error('Erro ao ler o conteúdo do arquivo.'));
+            }
+        };
+        reader.onerror = (error) => {
+            console.error("Erro no FileReader:", error);
+            reject(error);
+        };
+
+        // Read as Data URL for non-text files, read as text for likely text files
+        if (file.type.startsWith('text/') || determineFileCategory(file) === 'code' || determineFileCategory(file) === 'document') {
+             // Heuristic: Read potentially large text files carefully
+             if (file.size > 10 * 1024 * 1024) { // Example limit: 10MB for direct text reading
+                console.warn(`Arquivo "${file.name}" (${formatBytes(file.size)}) é grande para leitura direta como texto. Lendo como Data URL.`);
+                reader.readAsDataURL(file); // Fallback to Data URL for large text files
+             } else {
+                 reader.readAsText(file);
+             }
+        } else {
+            reader.readAsDataURL(file); // Read images, audio, video, etc. as Data URL
+        }
+    });
+};

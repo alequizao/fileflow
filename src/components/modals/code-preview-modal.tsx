@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -11,36 +12,13 @@ import {
   DialogClose
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area"; // Use ScrollArea for long code
-import { FileCode2, X, Copy, Check } from 'lucide-react'; // Icons
+import { FileCode2, X, Copy, Check, AlertTriangle } from 'lucide-react'; // Icons
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 
-// Basic Syntax Highlighting (Replace with a proper library like Prism.js or highlight.js for production)
-// This is a VERY rudimentary example and doesn't handle complex cases.
+// Basic Syntax Highlighting (Placeholder - use a library like Prism.js or highlight.js)
 const basicHighlight = (code: string, language: string): React.ReactNode => {
-    // Extremely simple keyword highlighting for demonstration
-    const keywords = ['function', 'const', 'let', 'var', 'if', 'else', 'return', 'import', 'export', 'class', 'new', 'await', 'async', 'public', 'private', 'protected', 'static', 'void', 'int', 'string', 'bool'];
-    const comments = code.match(/\/\*[\s\S]*?\*\/|\/\/.*/g) || [];
-    const strings = code.match(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g) || [];
-
-    // Split by delimiters but keep them
-    const parts = code.split(/(\s+|\(|\)|\{|\}|\[|\]|;|,|\.|=|\+|-|\*|\/|>|<|:|!|\?|&|\|)/);
-
-    return parts.map((part, index) => {
-        if (keywords.includes(part)) {
-            return <span key={index} className="text-blue-500 dark:text-blue-400 font-medium">{part}</span>;
-        }
-        if (strings.includes(part)) {
-             return <span key={index} className="text-green-600 dark:text-green-400">{part}</span>;
-        }
-         if (comments.some(comment => comment.includes(part))) {
-             return <span key={index} className="text-gray-500 dark:text-gray-400 italic">{part}</span>;
-         }
-        // Simple number check
-        if (!isNaN(Number(part)) && part.trim() !== '') {
-             return <span key={index} className="text-purple-600 dark:text-purple-400">{part}</span>;
-         }
-        return part;
-    });
+    // Return plain code for now, implement proper highlighting later
+    return code;
 };
 
 
@@ -48,16 +26,23 @@ interface CodePreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   fileName: string;
-  code: string;
-  language?: string; // Optional: Language hint for syntax highlighting
+  code: string | unknown; // Accept unknown type for content initially
+  language?: string;
 }
 
 export function CodePreviewModal({ isOpen, onClose, fileName, code, language = 'plaintext' }: CodePreviewModalProps) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
 
+  const codeAsString = typeof code === 'string' ? code : ''; // Ensure code is a string
+  const isValidContent = typeof code === 'string';
+
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(code).then(() => {
+      if (!isValidContent) {
+           toast({ title: "Erro", description: "Conteúdo inválido para cópia.", variant: "destructive" });
+           return;
+      }
+    navigator.clipboard.writeText(codeAsString).then(() => {
       setCopied(true);
       toast({ title: "Código Copiado!", description: "O conteúdo do arquivo foi copiado." });
       setTimeout(() => setCopied(false), 2000); // Reset copied state after 2 seconds
@@ -76,7 +61,7 @@ export function CodePreviewModal({ isOpen, onClose, fileName, code, language = '
               <FileCode2 className="mr-2 h-5 w-5" /> {fileName}
             </span>
              <div className="flex items-center gap-2">
-               <Button variant="ghost" size="sm" onClick={handleCopyCode} className="h-8 px-2">
+               <Button variant="ghost" size="sm" onClick={handleCopyCode} className="h-8 px-2" disabled={!isValidContent}>
                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                  <span className="ml-1">{copied ? 'Copiado' : 'Copiar'}</span>
                </Button>
@@ -90,10 +75,17 @@ export function CodePreviewModal({ isOpen, onClose, fileName, code, language = '
           </DialogTitle>
         </DialogHeader>
         <ScrollArea className="flex-grow overflow-auto">
-          <pre className="text-sm p-4 bg-muted/40 dark:bg-muted/20 overflow-x-auto">
-            {/* Apply basic highlighting */}
-            <code>{basicHighlight(code, language)}</code>
-          </pre>
+         {isValidContent ? (
+             <pre className="text-sm p-4 bg-muted/40 dark:bg-muted/20 overflow-x-auto">
+                {/* Apply basic highlighting */}
+                <code>{basicHighlight(codeAsString, language)}</code>
+             </pre>
+          ) : (
+               <div className="p-6 text-center text-muted-foreground flex flex-col items-center justify-center h-full">
+                    <AlertTriangle className="h-10 w-10 mb-2 text-destructive" />
+                    <p>Não foi possível exibir o conteúdo deste arquivo como texto.</p>
+               </div>
+          )}
         </ScrollArea>
       </DialogContent>
     </Dialog>

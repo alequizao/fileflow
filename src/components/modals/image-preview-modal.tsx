@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React from 'react';
@@ -26,7 +27,9 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
       const failedUrl = (e.target as HTMLImageElement)?.src; // Get the src that failed
-      console.error(`Error loading image for preview. URL: ${failedUrl}`, e);
+      // Shorten URL for logging if it's a long data URL
+      const urlToLog = failedUrl?.startsWith('data:') ? failedUrl.substring(0, 100) + '...' : failedUrl;
+      console.error(`Error loading image for preview. URL: ${urlToLog}`, e);
       toast({
           title: "Erro ao Carregar Imagem",
           description: "Não foi possível exibir a visualização da imagem.",
@@ -58,7 +61,7 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
           </DialogTitle>
         </DialogHeader>
         {/* Use a div container for centering and overflow handling */}
-        <div className="p-4 flex justify-center items-center flex-grow overflow-auto">
+        <div className="p-4 flex justify-center items-center flex-grow overflow-auto bg-muted/20"> {/* Added background */}
           {isValidDataUrl ? (
             // Use standard <img> tag for Data URLs
             // eslint-disable-next-line @next/next/no-img-element
@@ -73,11 +76,14 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
                   margin: 'auto' // Center image if smaller than container
               }}
               className="rounded-md shadow-md"
-              data-ai-hint="image display" // Updated AI hint
+              data-ai-hint="preview image" // AI hint
               onError={handleImageError} // Use the specific handler
             />
           ) : (
-            <p className="text-muted-foreground">URL da imagem inválida ou ausente.</p>
+             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                 <X className="h-12 w-12 mb-2 text-destructive" />
+                 <p>URL da imagem inválida ou ausente.</p>
+            </div>
           )}
         </div>
          {/* Footer can be added if needed for actions like download */}
@@ -88,4 +94,3 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
     </Dialog>
   );
 }
-
