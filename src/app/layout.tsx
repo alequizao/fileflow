@@ -18,7 +18,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning> {/* Add suppressHydrationWarning for next-themes, removed extra space */}
+    // Ensure no whitespace exists directly inside <html> other than the <head> (managed by Next.js) and <body> tags.
+    <html lang="pt-BR" suppressHydrationWarning>
+      {/* <head /> is automatically managed by Next.js */}
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider
             attribute="class"
