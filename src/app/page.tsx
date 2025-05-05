@@ -53,27 +53,61 @@ export default function Home() {
 
   // --- Local Storage Persistence ---
   useEffect(() => {
-    setIsMounted(true);
+    setIsMounted(true); // Mark as mounted after initial render
     if (typeof window !== 'undefined') {
       const storedItems = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (storedItems) {
         try {
           const parsedItems: FileSystemItem[] = JSON.parse(storedItems);
-          // Basic validation could be added here
+          // Items loaded from localStorage won't have the 'url' (content)
+          // Add basic validation if needed
           setItems(parsedItems);
         } catch (error) {
           console.error("Erro ao carregar itens do localStorage:", error);
-          localStorage.removeItem(LOCAL_STORAGE_KEY);
+          localStorage.removeItem(LOCAL_STORAGE_KEY); // Clear corrupted data
         }
       }
     }
-  }, []);
+  }, []); // Run only once on mount
 
+
+  // Save to localStorage whenever items change, excluding file content (url)
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(items));
+      try {
+          // Create a version of items excluding the 'url' property for files
+          const itemsToStore = items.map(item => {
+              if (isFile(item)) {
+                  // Destructure to create a new object without 'url' and 'previewContent'
+                  const { url, previewContent, ...itemWithoutContent } = item;
+                  return itemWithoutContent;
+              }
+              return item; // Keep folders as they are
+          });
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(itemsToStore));
+      } catch (error) {
+          // Handle potential storage errors (like QuotaExceededError)
+           if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)) {
+              console.error("Erro: Limite de armazenamento local excedido. Não foi possível salvar o estado atual.");
+              toast({
+                  title: "Erro de Armazenamento",
+                  description: "Limite de armazenamento local excedido. Algumas informações podem não ser salvas.",
+                  variant: "destructive",
+                  duration: 5000,
+              });
+           } else {
+               console.error("Erro ao salvar itens no localStorage:", error);
+               toast({
+                   title: "Erro Inesperado",
+                   description: "Não foi possível salvar o estado atual no armazenamento local.",
+                   variant: "destructive",
+                    duration: 5000,
+               });
+           }
+      }
     }
   }, [items, isMounted]);
+
 
     // --- Navigation Logic ---
     const handleFolderClick = useCallback((folderId: string | null) => {
@@ -107,7 +141,7 @@ export default function Home() {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             type: 'file',
-            url: dataUrl, // Store the Data URL
+            url: dataUrl, // Store the Data URL in memory
             size: file.size,
             fileCategory: determineFileCategory(file),
             uploadProgress: 0, // Reset progress
@@ -128,7 +162,7 @@ export default function Home() {
                   id: String(Date.now() + Math.random()), // Assign final ID
                   uploadProgress: 100,
                   isUploading: false,
-                  // URL remains the Data URL
+                  // URL remains the Data URL in memory
                 } : item
               ));
               toast({
@@ -244,65 +278,78 @@ export default function Home() {
 
   // --- Preview Logic ---
   const handlePreview = useCallback(async (item: FileSystemItem) => {
-      console.log("Tentando visualizar:", item); // Debug log 1
+      console.log("Tentando visualizar:", item);
       if (isFile(item)) {
           if (item.isUploading) {
               toast({ title: "Aguarde", description: "O upload ainda está em andamento." });
               return;
           }
-           // Ensure the URL is a data URL before proceeding
-           if (!item.url || !item.url.startsWith('data:')) {
-              toast({ title: "Erro", description: "URL do arquivo inválida ou não encontrada para visualização.", variant: "destructive" });
-              console.error("URL inválida ou ausente:", item.url); // Debug log
-              return;
+           // Ensure the URL (content) is available in memory before proceeding
+           // Items loaded from localStorage won't have a URL.
+           if (!item.url || typeof item.url !== 'string' || !item.url.startsWith('data:')) {
+                // Attempt to find the full item data in the current 'items' state (which should have the URL if recently uploaded)
+                 const currentItemData = items.find(i => i.id === item.id) as FileItemData | undefined;
+                 if (!currentItemData?.url || !currentItemData.url.startsWith('data:')) {
+                     toast({ title: "Conteúdo Indisponível", description: "O conteúdo do arquivo não está carregado na memória para visualização.", variant: "destructive" });
+                     console.error("URL/conteúdo inválido ou ausente para visualização:", item);
+                     return;
+                 }
+                 // Use the URL from the current state if available
+                 item.url = currentItemData.url;
            }
 
           try {
+              const dataUrl = item.url; // Now we are sure it exists
+
               if (item.fileCategory === 'image') {
-                  console.log("Definindo visualização de imagem para:", item.name); // Debug log
-                  setItemToPreview(item); // Opens ImagePreviewModal with data URL
+                  console.log("Definindo visualização de imagem para:", item.name);
+                  setItemToPreview({ ...item, url: dataUrl }); // Pass the data URL
               } else if (['code', 'document', 'pdf'].includes(item.fileCategory)) {
-                  const blob = dataUrlToBlob(item.url); // Convert data URL to Blob
+                  const blob = dataUrlToBlob(dataUrl); // Convert data URL to Blob
 
                   if (item.fileCategory === 'pdf') {
                       const pdfUrl = URL.createObjectURL(blob); // Create temporary blob URL
                       const pdfWindow = window.open(pdfUrl, '_blank');
-                      // Clean up the blob URL after the window is closed or after a timeout
                        if (pdfWindow) {
-                           pdfWindow.addEventListener('beforeunload', () => URL.revokeObjectURL(pdfUrl));
+                           const timer = setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000); // Fallback cleanup
+                           pdfWindow.addEventListener('beforeunload', () => {
+                               clearTimeout(timer);
+                               URL.revokeObjectURL(pdfUrl);
+                           });
                        } else {
-                           // Fallback cleanup if window opening fails
+                           console.warn("Não foi possível abrir a janela de PDF, limpando URL do blob após 60s.");
                            setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
                        }
                   } else { // Code or Document
                       const text = await blob.text();
-                      console.log("Definindo visualização de texto para:", item.name); // Debug log
-                      setItemToPreview({ ...item, previewContent: text }); // Add content and open CodePreviewModal
+                      console.log("Definindo visualização de texto para:", item.name);
+                      setItemToPreview({ ...item, url: dataUrl, previewContent: text }); // Add content and open CodePreviewModal
                   }
               } else { // Audio, Video, Other - attempt direct open/download using the data URL
-                  window.open(item.url, '_blank');
+                  window.open(dataUrl, '_blank');
               }
           } catch (error) {
               console.error("Erro ao processar visualização:", error);
               toast({
                   title: "Erro de Visualização",
-                  description: "Não foi possível carregar o conteúdo do arquivo.",
+                  description: `Não foi possível carregar o conteúdo do arquivo "${item.name}".`,
                   variant: "destructive"
               });
-              // Fallback: Try opening the data URL directly, though it might not work well for all types
-              try {
-                window.open(item.url, '_blank');
-              } catch (openError) {
-                console.error("Erro ao abrir URL de dados diretamente:", openError);
-              }
+               // Fallback: Try opening the data URL directly
+               if (item.url) {
+                   try {
+                       window.open(item.url, '_blank');
+                   } catch (openError) {
+                       console.error("Erro ao abrir URL de dados diretamente:", openError);
+                   }
+               }
           }
       } else if (isFolder(item)) {
-          // Handle folder click (navigation)
           handleFolderClick(item.id);
       } else {
-          console.warn("Tentativa de visualização em tipo de item desconhecido:", item); // Debug log
+          console.warn("Tentativa de visualização em tipo de item desconhecido:", item);
       }
-  }, [toast, handleFolderClick]); // Added handleFolderClick dependency
+  }, [toast, handleFolderClick, items]); // Added 'items' dependency
 
 
   // --- Drag and Drop Logic ---
@@ -451,26 +498,26 @@ export default function Home() {
           />
        )}
 
-       {/* Conditional rendering for Image Preview Modal */}
-        {itemToPreview && isFile(itemToPreview) && itemToPreview.fileCategory === 'image' && (
-            <ImagePreviewModal
-                isOpen={!!itemToPreview}
-                onClose={() => setItemToPreview(null)}
-                imageUrl={itemToPreview.url} // Pass the data URL
-                altText={itemToPreview.name}
-            />
-        )}
+        {/* Conditional rendering for Image Preview Modal */}
+         {itemToPreview && isFile(itemToPreview) && itemToPreview.fileCategory === 'image' && itemToPreview.url && (
+             <ImagePreviewModal
+                 isOpen={!!itemToPreview}
+                 onClose={() => setItemToPreview(null)}
+                 imageUrl={itemToPreview.url} // Pass the data URL from state
+                 altText={itemToPreview.name}
+             />
+         )}
 
-        {/* Conditional rendering for Code/Document Preview Modal */}
-        {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && typeof itemToPreview.previewContent === 'string' && (
-            <CodePreviewModal
-                isOpen={!!itemToPreview}
-                onClose={() => setItemToPreview(null)}
-                fileName={itemToPreview.name}
-                code={itemToPreview.previewContent} // Use the fetched content
-                language={itemToPreview.fileCategory === 'code' ? (itemToPreview.name.split('.').pop() || 'plaintext') : 'plaintext'} // Basic language detection
-            />
-        )}
+         {/* Conditional rendering for Code/Document Preview Modal */}
+         {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && typeof itemToPreview.previewContent === 'string' && (
+             <CodePreviewModal
+                 isOpen={!!itemToPreview}
+                 onClose={() => setItemToPreview(null)}
+                 fileName={itemToPreview.name}
+                 code={itemToPreview.previewContent} // Use the fetched content
+                 language={itemToPreview.fileCategory === 'code' ? (itemToPreview.name.split('.').pop() || 'plaintext') : 'plaintext'} // Basic language detection
+             />
+         )}
 
 
     </div>
