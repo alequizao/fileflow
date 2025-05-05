@@ -22,6 +22,14 @@ interface ImagePreviewModalProps {
 
 export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImagePreviewModalProps) {
 
+  const handleImageError = () => {
+    // Log a more specific error message
+    console.error(`Error loading image for preview. URL: ${imageUrl}`);
+    // Optionally, display an error message to the user within the modal
+    // For now, we rely on the console log and the fallback text below.
+  };
+
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[80vw] md:max-w-[70vw] lg:max-w-[60vw] xl:max-w-[50vw] p-0 border-0 max-h-[85vh]">
@@ -49,7 +57,7 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
               style={{ width: 'auto', height: 'auto', maxHeight: 'calc(85vh - 100px)', maxWidth: '100%' }} // Control display size
               className="rounded-md shadow-md"
               data-ai-hint="preview image" // AI hint
-              onError={(e) => console.error("Error loading image:", e)} // Basic error handling
+              onError={handleImageError} // Updated error handler
             />
           ) : (
             <p className="text-muted-foreground">Não foi possível carregar a imagem.</p>
