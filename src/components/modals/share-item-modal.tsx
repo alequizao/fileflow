@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Share2, Link as LinkIcon, Copy, Eye, Download, Edit } from 'lucide-react'; // Import icons
 import type { FileSystemItem } from '@/types/file';
-import { isFolder } from '@/types/file';
+import { isFolder, isFile } from '@/types/file'; // Import isFile
 import { useToast } from '@/hooks/use-toast';
 
 interface ShareItemModalProps {
@@ -35,7 +35,7 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
 
   useEffect(() => {
     if (isOpen && item) {
-      // Mock link generation
+      // Mock link generation - Use ID for uniqueness in example
       const mockLink = `${window.location.origin}/share/${item.id}?type=${item.type}`;
       setShareLink(mockLink);
       // Reset permissions on open
@@ -48,6 +48,7 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
   }, [isOpen, item]);
 
   const handleCopyLink = () => {
+    if (!shareLink) return;
     navigator.clipboard.writeText(shareLink).then(() => {
       toast({ title: "Link Copiado!", description: "Link de compartilhamento copiado para a área de transferência." });
     }).catch(err => {
@@ -62,6 +63,8 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
           console.log(`Sharing ${item.name} with permissions: View=${allowView}, Download=${allowDownload}, Edit=${allowEdit}`);
           onConfirmShare(item); // Trigger the parent's share confirmation logic (e.g., show toast)
       }
+      // Optionally close the modal here or let the parent handle it
+      // onClose();
   };
 
   if (!item) return null;
@@ -90,9 +93,10 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
                 id="link"
                 value={shareLink}
                 readOnly
+                aria-label="Link de compartilhamento"
               />
             </div>
-            <Button type="button" size="sm" className="px-3" onClick={handleCopyLink}>
+            <Button type="button" size="sm" className="px-3" onClick={handleCopyLink} disabled={!shareLink} aria-label="Copiar link">
               <span className="sr-only">Copiar</span>
               <Copy className="h-4 w-4" />
             </Button>
@@ -102,7 +106,7 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
            <div className="space-y-3 pt-2">
                <h4 className="text-sm font-medium">Permissões (Simulação)</h4>
                <div className="flex items-center justify-between">
-                   <Label htmlFor="allow-view" className="flex items-center gap-2 text-sm font-normal">
+                   <Label htmlFor="allow-view" className="flex items-center gap-2 text-sm font-normal cursor-not-allowed opacity-50">
                        <Eye className="h-4 w-4 text-muted-foreground"/> Permitir Visualização
                    </Label>
                    <Switch
@@ -111,28 +115,31 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
                        onCheckedChange={setAllowView}
                        disabled // In this mock, view is always allowed
                        aria-readonly
+                       aria-label="Permitir visualização (desabilitado)"
                    />
                </div>
                 <div className="flex items-center justify-between">
-                   <Label htmlFor="allow-download" className="flex items-center gap-2 text-sm font-normal">
+                   <Label htmlFor="allow-download" className="flex items-center gap-2 text-sm font-normal cursor-pointer">
                        <Download className="h-4 w-4 text-muted-foreground"/> Permitir Download
                    </Label>
                    <Switch
                        id="allow-download"
                        checked={allowDownload}
                        onCheckedChange={setAllowDownload}
+                       aria-label="Permitir download"
                    />
                </div>
-                {/* Edit might only make sense for certain file types */}
+                {/* Edit might only make sense for certain file types - Use isFile guard here */}
                 {isFile(item) && ['document', 'code', 'other'].includes(item.fileCategory) && (
                    <div className="flex items-center justify-between">
-                       <Label htmlFor="allow-edit" className="flex items-center gap-2 text-sm font-normal">
+                       <Label htmlFor="allow-edit" className="flex items-center gap-2 text-sm font-normal cursor-pointer">
                            <Edit className="h-4 w-4 text-muted-foreground"/> Permitir Edição (se aplicável)
                        </Label>
                        <Switch
                            id="allow-edit"
                            checked={allowEdit}
                            onCheckedChange={setAllowEdit}
+                           aria-label="Permitir edição"
                        />
                    </div>
                 )}
@@ -141,10 +148,11 @@ export function ShareItemModal({ item, isOpen, onClose, onConfirmShare }: ShareI
         </div>
         <DialogFooter className="sm:justify-end gap-2">
           <Button type="button" variant="outline" onClick={onClose}>Fechar</Button>
-          {/* In this simplified version, "Confirmar" just closes the modal */}
+          {/* In this simplified version, "Confirmar" just closes the modal via parent */}
           <Button type="button" onClick={handleConfirm}>Confirmar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+
