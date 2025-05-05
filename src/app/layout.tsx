@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google'; // Using Inter as a modern sans-serif font
 import './globals.css';
@@ -25,3 +26,4 @@ export default function RootLayout({
     </html>
   );
 }
+

@@ -1,149 +1,427 @@
 
-'use client'; // Add this directive to make the component a Client Component
+'use client';
 
-import { useState, useEffect } from 'react'; // Import useState and useEffect
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from "@/components/layout/header";
 import { FileList } from "@/components/file-list";
 import { Footer } from "@/components/layout/footer";
-import type { UploadedFile, FileType } from "@/types/file"; // Import FileType
-import { useToast } from '@/hooks/use-toast'; // Import useToast for notifications
+import type { FileSystemItem, FileItemData, FolderItemData, FileCategory } from "@/types/file";
+import { isFile, isFolder, formatBytes, determineFileCategory } from "@/types/file";
+import { useToast } from '@/hooks/use-toast';
+import { Breadcrumb } from '@/components/breadcrumb'; // Import Breadcrumb
+import { CreateFolderModal } from '@/components/modals/create-folder-modal';
+import { RenameItemModal } from '@/components/modals/rename-item-modal';
+import { ShareItemModal } from '@/components/modals/share-item-modal';
+import { ImagePreviewModal } from '@/components/modals/image-preview-modal';
+import { CodePreviewModal } from '@/components/modals/code-preview-modal';
 
-const LOCAL_STORAGE_KEY = 'fileflow-files';
+const LOCAL_STORAGE_KEY = 'fileflow-items';
 
 export default function Home() {
-  // State to hold the list of files, initialized lazily from localStorage or empty array
-  const [files, setFiles] = useState<UploadedFile[]>(() => {
-    // This function runs only on initial render on the client
+  const [items, setItems] = useState<FileSystemItem[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null); // null represents the root
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<FileCategory | 'folder' | 'all'>('all');
+  const [isMounted, setIsMounted] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isCreateFolderModalOpen, setIsCreateFolderModalOpen] = useState(false);
+  const [itemToRename, setItemToRename] = useState<FileSystemItem | null>(null);
+  const [itemToShare, setItemToShare] = useState<FileSystemItem | null>(null);
+  const [itemToPreview, setItemToPreview] = useState<FileItemData | null>(null); // For image/code preview
+  const { toast } = useToast();
+
+  // --- Local Storage Persistence ---
+  useEffect(() => {
+    setIsMounted(true);
     if (typeof window !== 'undefined') {
-      const storedFiles = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (storedFiles) {
+      const storedItems = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (storedItems) {
         try {
-          return JSON.parse(storedFiles);
+          const parsedItems: FileSystemItem[] = JSON.parse(storedItems);
+          // Basic validation could be added here
+          setItems(parsedItems);
         } catch (error) {
-          console.error("Error parsing files from local storage:", error);
-          localStorage.removeItem(LOCAL_STORAGE_KEY); // Clear corrupted data
+          console.error("Erro ao carregar itens do localStorage:", error);
+          localStorage.removeItem(LOCAL_STORAGE_KEY);
         }
       }
     }
-    return []; // Default to empty array if no localStorage or if server-rendering initially
-  });
-
-  const { toast } = useToast();
-  const [isMounted, setIsMounted] = useState(false);
-
-  // Effect to mark component as mounted (for client-side execution)
-  useEffect(() => {
-    setIsMounted(true);
   }, []);
 
-  // Effect to save files to localStorage whenever the files state changes, only run on client after mount
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(files));
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(items));
     }
-  }, [files, isMounted]);
+  }, [items, isMounted]);
 
-  // Define handlers within the Client Component
-  const handleUpload = async (file: File) => {
-    console.log("Uploading file:", file.name);
-    // --- Mock Upload Logic ---
-    // Simulate upload delay
-    await new Promise(resolve => setTimeout(resolve, 500)); // Shorter delay
+  // --- Upload Logic ---
+  const handleUpload = useCallback((files: FileList | File[]) => {
+    const filesArray = Array.from(files);
+    if (!filesArray.length) return;
 
-    // Determine file type including 'code'
-    const fileExtension = file.name.split('.').pop()?.toLowerCase();
-    let fileType: FileType = 'other';
+    filesArray.forEach(file => {
+      const tempId = `uploading-${Date.now()}-${Math.random()}`;
+      const newItem: FileItemData = {
+        id: tempId,
+        name: file.name,
+        parentId: currentFolderId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        type: 'file',
+        url: '', // Will be blob URL during upload simulation
+        size: file.size,
+        fileCategory: determineFileCategory(file),
+        uploadProgress: 0,
+        isUploading: true,
+      };
 
-    if (file.type.startsWith('image/')) {
-      fileType = 'image';
-    } else if (file.type === 'application/pdf') {
-      fileType = 'pdf';
-    } else if (file.type.startsWith('audio/')) {
-      fileType = 'audio';
-    } else if (file.type.startsWith('video/')) {
-      fileType = 'video';
-    } else if (/\.(docx?|xlsx?|pptx?|txt|rtf|csv)$/i.test(file.name)) { // Expanded doc types
-       fileType = 'document';
-    } else if (/\.(js|jsx|ts|tsx|py|html|php|css|json|md|java|c|cpp|cs|rb|go|swift|kt)$/i.test(file.name)) { // Expanded code types
-       fileType = 'code';
-    }
-    // Keep 'other' for archives etc. (or specific types if needed)
-    else if (/\.(zip|rar|tar|gz|7z)$/i.test(file.name)) {
-        fileType = 'other';
-    }
+      setItems(prevItems => [...prevItems, newItem]);
 
-    // Create a new file entry
-    const newFile: UploadedFile = {
-      id: String(Date.now()), // Simple unique ID generation
-      name: file.name,
-      // Create a Blob URL for preview/download in this mock setup
-      // In a real app, this would likely be a URL from your storage service
-      url: URL.createObjectURL(file),
-      size: `${(file.size / (file.size > 1024 * 1024 ? 1024 * 1024 : 1024)).toFixed(file.size > 1024 * 1024 ? 2 : 0)} ${file.size > 1024 * 1024 ? 'MB' : 'KB'}`, // Dynamic KB/MB
-      date: new Date().toLocaleString('pt-BR'),
-      type: fileType, // Assign determined type
-    };
-
-    // Add the new file to the list
-    setFiles(prevFiles => [newFile, ...prevFiles]);
-
-    toast({
-      title: "Upload Concluído",
-      description: `Arquivo "${file.name}" adicionado.`,
-      variant: "default",
+      // --- Mock Upload Progress ---
+      const blobUrl = URL.createObjectURL(file);
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += Math.random() * 20; // Simulate progress increase
+        if (progress >= 100) {
+          clearInterval(interval);
+          setItems(prevItems => prevItems.map(item =>
+            item.id === tempId ? {
+              ...item,
+              id: String(Date.now() + Math.random()), // Assign final ID
+              uploadProgress: 100,
+              isUploading: false,
+              url: blobUrl // Assign final Blob URL (in real app, this would be storage URL)
+            } : item
+          ));
+          toast({
+            title: "Upload Concluído",
+            description: `Arquivo "${file.name}" adicionado.`,
+          });
+        } else {
+          setItems(prevItems => prevItems.map(item =>
+            item.id === tempId ? { ...item, uploadProgress: Math.min(progress, 100), url: blobUrl } : item
+          ));
+        }
+      }, 100 + Math.random() * 200); // Simulate varying upload speed
+      // --- End Mock Upload Progress ---
     });
-    // --- End Mock Upload Logic ---
+  }, [currentFolderId, toast]);
 
-    // In a real app (example):
-    // 1. Upload file to storage (e.g., Firebase Storage, S3)
-    // 2. Get the download URL.
-    // 3. Save file metadata (including URL) to a database (e.g., Firestore).
-    // 4. Update the local state `files` with data from the database.
-  };
 
-  const handleDelete = async (fileId: string) => {
-    console.log("Deleting file:", fileId);
-    const fileToDelete = files.find(f => f.id === fileId);
-    if (!fileToDelete) return;
+  // --- Deletion Logic ---
+  const handleDelete = useCallback(async (itemId: string) => {
+    const itemToDelete = items.find(item => item.id === itemId);
+    if (!itemToDelete) return;
 
-    // --- Mock Deletion Logic ---
-    const fileName = fileToDelete.name;
-
-    // Revoke the Blob URL if it exists to free memory
-    if (fileToDelete.url.startsWith('blob:')) {
-      URL.revokeObjectURL(fileToDelete.url);
+    let itemsToRemove = [itemId];
+    // If it's a folder, find all descendant items recursively
+    if (isFolder(itemToDelete)) {
+      const findDescendants = (folderId: string): string[] => {
+        let descendants: string[] = [];
+        const children = items.filter(item => item.parentId === folderId);
+        children.forEach(child => {
+          descendants.push(child.id);
+          if (isFolder(child)) {
+            descendants = descendants.concat(findDescendants(child.id));
+          }
+        });
+        return descendants;
+      };
+      itemsToRemove = itemsToRemove.concat(findDescendants(itemId));
     }
 
-    setFiles(prevFiles => prevFiles.filter(file => file.id !== fileId));
+    // Revoke Blob URLs for files being deleted
+    itemsToRemove.forEach(idToRemove => {
+        const item = items.find(i => i.id === idToRemove);
+        if (item && isFile(item) && item.url.startsWith('blob:')) {
+            try {
+              URL.revokeObjectURL(item.url);
+            } catch (e) {
+              console.warn(`Failed to revoke blob URL for ${item.name}: ${e}`);
+            }
+        }
+    });
+
+
+    setItems(prevItems => prevItems.filter(item => !itemsToRemove.includes(item.id)));
+
     toast({
       title: "Exclusão Concluída",
-      description: `"${fileName}" excluído com sucesso.`,
-      variant: "default", // Or maybe "destructive" look? Default is fine.
+      description: `"${itemToDelete.name}" ${isFolder(itemToDelete) ? 'e seu conteúdo foram excluídos' : 'foi excluído'}.`,
+      variant: "default",
     });
-    // --- End Mock Deletion Logic ---
+  }, [items, toast]);
 
-    // In a real app (example):
-    // 1. Delete file from storage.
-    // 2. Delete file metadata from database.
-    // 3. Update local state `files`.
+
+  // --- Folder Creation Logic ---
+  const handleCreateFolder = useCallback((folderName: string) => {
+    if (!folderName.trim()) {
+      toast({ title: "Erro", description: "O nome da pasta não pode estar vazio.", variant: "destructive" });
+      return;
+    }
+    const newFolder: FolderItemData = {
+      id: String(Date.now() + Math.random()),
+      name: folderName.trim(),
+      parentId: currentFolderId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      type: 'folder',
+    };
+    setItems(prevItems => [...prevItems, newFolder]);
+    setIsCreateFolderModalOpen(false);
+    toast({ title: "Sucesso", description: `Pasta "${newFolder.name}" criada.` });
+  }, [currentFolderId, toast]);
+
+   // --- Renaming Logic ---
+   const handleRename = useCallback((itemId: string, newName: string) => {
+    if (!newName.trim()) {
+        toast({ title: "Erro", description: "O nome não pode estar vazio.", variant: "destructive" });
+        return;
+    }
+    setItems(prevItems =>
+      prevItems.map(item =>
+        item.id === itemId ? { ...item, name: newName.trim(), updatedAt: new Date().toISOString() } : item
+      )
+    );
+    setItemToRename(null); // Close modal
+    toast({ title: "Sucesso", description: `Item renomeado para "${newName.trim()}".` });
+  }, [toast]);
+
+  // --- Sharing Logic (Mock) ---
+  const handleShare = useCallback((item: FileSystemItem) => {
+    // In a real app, generate a shareable link/token and potentially set permissions
+    const shareLink = `${window.location.origin}/share/${item.id}`; // Example link
+    navigator.clipboard.writeText(shareLink).then(() => {
+      toast({ title: "Link Copiado!", description: `Link para "${item.name}" copiado para a área de transferência.` });
+    }).catch(err => {
+      toast({ title: "Erro", description: "Não foi possível copiar o link.", variant: "destructive" });
+      console.error("Failed to copy link:", err);
+    });
+    setItemToShare(null); // Close modal
+  }, [toast]);
+
+  // --- Preview Logic ---
+   const handlePreview = useCallback(async (item: FileSystemItem) => {
+    if (isFile(item)) {
+      if (item.isUploading) {
+        toast({ title: "Aguarde", description: "O upload ainda está em andamento."});
+        return;
+      }
+      if (!item.url) {
+        toast({ title: "Erro", description: "URL do arquivo não encontrada.", variant: "destructive" });
+        return;
+      }
+
+      if (item.fileCategory === 'image') {
+        setItemToPreview(item);
+      } else if (item.fileCategory === 'code' || item.fileCategory === 'document' || item.fileCategory === 'pdf') {
+         // For text-based or PDF files, fetch content if it's a blob URL
+         if (item.url.startsWith('blob:')) {
+           try {
+             const response = await fetch(item.url);
+             if (!response.ok) throw new Error('Failed to fetch blob content');
+             const blob = await response.blob();
+             // PDF handling: Open in new tab directly
+             if (item.fileCategory === 'pdf') {
+                const pdfUrl = URL.createObjectURL(blob);
+                window.open(pdfUrl, '_blank');
+                // Optionally revoke after a delay or track open tabs
+                // setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+                return; // Exit early for PDF
+             }
+             // For code/document, read as text
+             const text = await blob.text();
+             setItemToPreview({ ...item, previewContent: text } as FileItemData & { previewContent: string }); // Add content to preview
+
+           } catch (error) {
+             console.error("Error fetching/reading blob content:", error);
+             toast({ title: "Erro de Visualização", description: "Não foi possível carregar o conteúdo do arquivo.", variant: "destructive"});
+           }
+         } else {
+           // If it's not a blob URL (e.g., a direct link to storage), try opening directly
+           window.open(item.url, '_blank');
+         }
+      } else {
+        // For other types (audio, video, other), just attempt to open/download in a new tab
+         window.open(item.url, '_blank');
+      }
+    } else {
+      // Handle folder preview? (e.g., show summary - maybe later)
+      toast({ description: "Visualização de pastas não implementada."});
+    }
+  }, [toast]);
+
+  // --- Navigation Logic ---
+  const handleFolderClick = (folderId: string) => {
+    setCurrentFolderId(folderId);
+    setSearchQuery(''); // Reset search when changing folders
+    setFilterType('all'); // Reset filter
+  };
+
+  const navigateToParent = () => {
+    if (currentFolderId === null) return; // Already at root
+    const currentFolder = items.find(item => item.id === currentFolderId);
+    setCurrentFolderId(currentFolder?.parentId ?? null);
+    setSearchQuery('');
+    setFilterType('all');
   };
 
 
+  // --- Drag and Drop Logic ---
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // Check if the leave target is outside the drop zone
+    if (event.relatedTarget && !(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)) {
+      setIsDragging(false);
+    } else if (!event.relatedTarget) {
+        // Handle case where drag leaves the window
+        setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+    const files = event.dataTransfer.files;
+    if (files && files.length > 0) {
+      handleUpload(files);
+      event.dataTransfer.clearData();
+    }
+  }, [handleUpload]);
+
+
+  // --- Filtering and Searching Logic ---
+  const filteredItems = useMemo(() => {
+    return items
+      .filter(item => item.parentId === currentFolderId) // Filter by current folder
+      .filter(item => { // Filter by search query (name)
+        if (!searchQuery) return true;
+        return item.name.toLowerCase().includes(searchQuery.toLowerCase());
+      })
+      .filter(item => { // Filter by type
+        if (filterType === 'all') return true;
+        if (filterType === 'folder') return isFolder(item);
+        return isFile(item) && item.fileCategory === filterType;
+      })
+      // Sort: Folders first, then by name alphabetically
+      .sort((a, b) => {
+        if (a.type === 'folder' && b.type === 'file') return -1;
+        if (a.type === 'file' && b.type === 'folder') return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [items, currentFolderId, searchQuery, filterType]);
+
+
+  // --- Breadcrumb Data ---
+  const breadcrumbItems = useMemo(() => {
+    const path: { id: string | null; name: string }[] = [{ id: null, name: 'Início' }];
+    let currentId = currentFolderId;
+    while (currentId) {
+      const folder = items.find(item => item.id === currentId && isFolder(item));
+      if (folder) {
+        path.push({ id: folder.id, name: folder.name });
+        currentId = folder.parentId;
+      } else {
+        break; // Should not happen in consistent data
+      }
+    }
+    return path.reverse();
+  }, [items, currentFolderId]);
+
   return (
-    <div className="flex flex-col min-h-screen bg-background">
-      {/* Pass handlers down to Client Components */}
-      <Header onUpload={handleUpload} />
-      <main className="flex-grow p-4 space-y-4 container mx-auto">
-        {/* Only render FileList on the client after mount to ensure localStorage is read */}
+    <div
+      className={`flex flex-col min-h-screen bg-background transition-colors duration-200 ${isDragging ? 'bg-blue-100 dark:bg-blue-900' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Header with Upload, Search, Filter, Create Folder */}
+      <Header
+        onUpload={(file) => handleUpload([file])}
+        onSearch={setSearchQuery}
+        currentSearch={searchQuery}
+        onFilterChange={setFilterType}
+        currentFilter={filterType}
+        onCreateFolder={() => setIsCreateFolderModalOpen(true)}
+      />
+
+      <main className="flex-grow p-4 container mx-auto space-y-4">
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
+            <p className="text-white text-2xl font-semibold">Arraste arquivos aqui para enviar</p>
+          </div>
+        )}
+
+        {/* Breadcrumb Navigation */}
+        <Breadcrumb items={breadcrumbItems} onNavigate={handleFolderClick} />
+
+
+        {/* File List */}
         {isMounted ? (
-          <FileList files={files} onDelete={handleDelete} />
+          <FileList
+            items={filteredItems}
+            onDelete={handleDelete}
+            onFolderClick={handleFolderClick}
+            onRename={setItemToRename} // Pass setter to open rename modal
+            onShare={setItemToShare}     // Pass setter to open share modal
+            onPreview={handlePreview}   // Pass preview handler
+          />
         ) : (
-          // Optional: Add a loading indicator while waiting for client mount
-          <div className="text-center text-muted-foreground mt-10">Carregando arquivos...</div>
+          <div className="text-center text-muted-foreground mt-10">Carregando...</div>
         )}
       </main>
+
       <Footer />
+
+      {/* Modals */}
+      <CreateFolderModal
+        isOpen={isCreateFolderModalOpen}
+        onClose={() => setIsCreateFolderModalOpen(false)}
+        onCreate={handleCreateFolder}
+      />
+       {itemToRename && (
+        <RenameItemModal
+            item={itemToRename}
+            isOpen={!!itemToRename}
+            onClose={() => setItemToRename(null)}
+            onRename={handleRename}
+        />
+      )}
+      {itemToShare && (
+          <ShareItemModal
+              item={itemToShare}
+              isOpen={!!itemToShare}
+              onClose={() => setItemToShare(null)}
+              onConfirmShare={handleShare} // Use the simplified mock share handler
+          />
+       )}
+       {itemToPreview && isFile(itemToPreview) && itemToPreview.fileCategory === 'image' && (
+          <ImagePreviewModal
+            isOpen={!!itemToPreview}
+            onClose={() => setItemToPreview(null)}
+            imageUrl={itemToPreview.url}
+            altText={itemToPreview.name}
+          />
+       )}
+       {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && 'previewContent' in itemToPreview && (
+            <CodePreviewModal
+                isOpen={!!itemToPreview}
+                onClose={() => setItemToPreview(null)}
+                fileName={itemToPreview.name}
+                code={(itemToPreview as FileItemData & { previewContent: string }).previewContent} // Type assertion
+                language={itemToPreview.fileCategory === 'code' ? (itemToPreview.name.split('.').pop() || 'plaintext') : 'plaintext'} // Basic language detection
+            />
+        )}
+
+
     </div>
   );
 }
-

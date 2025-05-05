@@ -61,16 +61,8 @@ export default {
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
   			},
-        // Custom category colors
-        category: {
-          pdf: 'hsl(var(--category-pdf))',
-          image: 'hsl(var(--category-image))',
-          document: 'hsl(var(--category-document))',
-          audio: 'hsl(var(--category-audio))',
-          video: 'hsl(var(--category-video))',
-          code: 'hsl(var(--category-code))', // Add code category
-          other: 'hsl(var(--category-other))',
-        }
+        // Removed custom category colors as we use direct Tailwind classes now
+        // category: { ... }
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
