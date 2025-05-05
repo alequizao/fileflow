@@ -8,7 +8,7 @@ import { Footer } from "@/components/layout/footer";
 import type { FileSystemItem, FileItemData, FolderItemData, FileCategory } from "@/types/file";
 import { isFile, isFolder, formatBytes, determineFileCategory } from "@/types/file";
 import { useToast } from '@/hooks/use-toast';
-import { Breadcrumb } from '@/components/breadcrumb'; // Import Breadcrumb
+import { Breadcrumb } from '@/components/breadcrumb';
 import { CreateFolderModal } from '@/components/modals/create-folder-modal';
 import { RenameItemModal } from '@/components/modals/rename-item-modal';
 import { ShareItemModal } from '@/components/modals/share-item-modal';
@@ -61,89 +61,98 @@ export default function Home() {
 
     filesArray.forEach(file => {
       const tempId = `uploading-${Date.now()}-${Math.random()}`;
-      const newItem: FileItemData = {
-        id: tempId,
-        name: file.name,
-        parentId: currentFolderId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        type: 'file',
-        url: '', // Will be blob URL during upload simulation
-        size: file.size,
-        fileCategory: determineFileCategory(file),
-        uploadProgress: 0,
-        isUploading: true,
+      const reader = new FileReader();
+
+      // Read file content as Data URL for preview/storage simulation
+      reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+
+          const newItem: FileItemData = {
+            id: tempId,
+            name: file.name,
+            parentId: currentFolderId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            type: 'file',
+            url: dataUrl, // Use Data URL directly
+            size: file.size,
+            fileCategory: determineFileCategory(file),
+            uploadProgress: 0, // Reset progress
+            isUploading: true,
+          };
+
+          setItems(prevItems => [...prevItems, newItem]);
+
+          // --- Mock Upload Progress (no longer needs blob URL) ---
+          let progress = 0;
+          const interval = setInterval(() => {
+            progress += Math.random() * 20; // Simulate progress increase
+            if (progress >= 100) {
+              clearInterval(interval);
+              setItems(prevItems => prevItems.map(item =>
+                item.id === tempId ? {
+                  ...item,
+                  id: String(Date.now() + Math.random()), // Assign final ID
+                  uploadProgress: 100,
+                  isUploading: false,
+                  // URL remains the Data URL
+                } : item
+              ));
+              toast({
+                title: "Upload Concluído",
+                description: `Arquivo "${file.name}" adicionado.`,
+              });
+            } else {
+              setItems(prevItems => prevItems.map(item =>
+                item.id === tempId ? { ...item, uploadProgress: Math.min(progress, 100) } : item
+              ));
+            }
+          }, 100 + Math.random() * 200); // Simulate varying upload speed
+           // --- End Mock Upload Progress ---
       };
 
-      setItems(prevItems => [...prevItems, newItem]);
+       reader.onerror = (error) => {
+         console.error("Erro ao ler arquivo:", error);
+         toast({
+           title: "Erro de Upload",
+           description: `Não foi possível ler o arquivo "${file.name}".`,
+           variant: "destructive",
+         });
+          // Remove the temporary item if reading fails
+          setItems(prevItems => prevItems.filter(item => item.id !== tempId));
+       };
 
-      // --- Mock Upload Progress ---
-      const blobUrl = URL.createObjectURL(file);
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += Math.random() * 20; // Simulate progress increase
-        if (progress >= 100) {
-          clearInterval(interval);
-          setItems(prevItems => prevItems.map(item =>
-            item.id === tempId ? {
-              ...item,
-              id: String(Date.now() + Math.random()), // Assign final ID
-              uploadProgress: 100,
-              isUploading: false,
-              url: blobUrl // Assign final Blob URL (in real app, this would be storage URL)
-            } : item
-          ));
-          toast({
-            title: "Upload Concluído",
-            description: `Arquivo "${file.name}" adicionado.`,
-          });
-        } else {
-          setItems(prevItems => prevItems.map(item =>
-            item.id === tempId ? { ...item, uploadProgress: Math.min(progress, 100), url: blobUrl } : item
-          ));
-        }
-      }, 100 + Math.random() * 200); // Simulate varying upload speed
-      // --- End Mock Upload Progress ---
+      reader.readAsDataURL(file); // Read the file
     });
   }, [currentFolderId, toast]);
 
 
   // --- Deletion Logic ---
-  const handleDelete = useCallback(async (itemId: string) => {
+  const handleDelete = useCallback((itemId: string) => {
     const itemToDelete = items.find(item => item.id === itemId);
-    if (!itemToDelete) return;
-
-    let itemsToRemove = [itemId];
-    // If it's a folder, find all descendant items recursively
-    if (isFolder(itemToDelete)) {
-      const findDescendants = (folderId: string): string[] => {
-        let descendants: string[] = [];
-        const children = items.filter(item => item.parentId === folderId);
-        children.forEach(child => {
-          descendants.push(child.id);
-          if (isFolder(child)) {
-            descendants = descendants.concat(findDescendants(child.id));
-          }
-        });
-        return descendants;
-      };
-      itemsToRemove = itemsToRemove.concat(findDescendants(itemId));
+    if (!itemToDelete) {
+        console.warn("Item not found for deletion:", itemId);
+        return;
     }
 
-    // Revoke Blob URLs for files being deleted
-    itemsToRemove.forEach(idToRemove => {
-        const item = items.find(i => i.id === idToRemove);
-        if (item && isFile(item) && item.url.startsWith('blob:')) {
-            try {
-              URL.revokeObjectURL(item.url);
-            } catch (e) {
-              console.warn(`Failed to revoke blob URL for ${item.name}: ${e}`);
-            }
-        }
-    });
+    let itemsToRemoveIds = new Set<string>([itemId]);
 
+    // If it's a folder, find all descendant items recursively
+    if (isFolder(itemToDelete)) {
+      const findDescendants = (folderId: string) => {
+        const children = items.filter(item => item.parentId === folderId);
+        children.forEach(child => {
+          itemsToRemoveIds.add(child.id);
+          if (isFolder(child)) {
+            findDescendants(child.id);
+          }
+        });
+      };
+      findDescendants(itemId);
+    }
 
-    setItems(prevItems => prevItems.filter(item => !itemsToRemove.includes(item.id)));
+     // Update state by filtering out the items to be removed
+    setItems(prevItems => prevItems.filter(item => !itemsToRemoveIds.has(item.id)));
 
     toast({
       title: "Exclusão Concluída",
@@ -213,57 +222,64 @@ export default function Home() {
       }
 
       if (item.fileCategory === 'image') {
-        setItemToPreview(item);
+        setItemToPreview(item); // Opens ImagePreviewModal
       } else if (item.fileCategory === 'code' || item.fileCategory === 'document' || item.fileCategory === 'pdf') {
-         // For text-based or PDF files, fetch content if it's a blob URL
-         if (item.url.startsWith('blob:')) {
+         // Data URLs are handled differently
+         if (item.url.startsWith('data:')) {
+           const mimeType = item.url.substring(item.url.indexOf(':') + 1, item.url.indexOf(';'));
+           const base64Data = item.url.substring(item.url.indexOf(',') + 1);
+
            try {
-             const response = await fetch(item.url);
-             if (!response.ok) throw new Error('Failed to fetch blob content');
-             const blob = await response.blob();
-             // PDF handling: Open in new tab directly
-             if (item.fileCategory === 'pdf') {
-                const pdfUrl = URL.createObjectURL(blob);
-                window.open(pdfUrl, '_blank');
-                // Optionally revoke after a delay or track open tabs
-                // setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
-                return; // Exit early for PDF
+             const byteCharacters = atob(base64Data);
+             const byteNumbers = new Array(byteCharacters.length);
+             for (let i = 0; i < byteCharacters.length; i++) {
+               byteNumbers[i] = byteCharacters.charCodeAt(i);
              }
-             // For code/document, read as text
-             const text = await blob.text();
-             setItemToPreview({ ...item, previewContent: text } as FileItemData & { previewContent: string }); // Add content to preview
+             const byteArray = new Uint8Array(byteNumbers);
+             const blob = new Blob([byteArray], { type: mimeType });
+
+             if (item.fileCategory === 'pdf') {
+               const pdfUrl = URL.createObjectURL(blob);
+               window.open(pdfUrl, '_blank');
+               // Consider revoking the object URL later if needed
+               // setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+               return; // Exit early for PDF
+             } else {
+               // For code/document, read blob as text
+               const text = await blob.text();
+               setItemToPreview({ ...item, previewContent: text } as FileItemData & { previewContent: string }); // Opens CodePreviewModal
+             }
 
            } catch (error) {
-             console.error("Error fetching/reading blob content:", error);
+             console.error("Error processing data URL content:", error);
              toast({ title: "Erro de Visualização", description: "Não foi possível carregar o conteúdo do arquivo.", variant: "destructive"});
+             // If direct processing fails, maybe still try opening the data URL directly
+             window.open(item.url, '_blank');
            }
+
          } else {
-           // If it's not a blob URL (e.g., a direct link to storage), try opening directly
+           // If it's not a data URL (e.g., a direct link - unlikely with current setup), try opening directly
            window.open(item.url, '_blank');
          }
       } else {
-        // For other types (audio, video, other), just attempt to open/download in a new tab
-         window.open(item.url, '_blank');
+        // For other types (audio, video, other), attempt to open/download
+        window.open(item.url, '_blank');
       }
     } else {
-      // Handle folder preview? (e.g., show summary - maybe later)
-      toast({ description: "Visualização de pastas não implementada."});
+      // Handle folder click (navigation)
+      handleFolderClick(item.id);
     }
-  }, [toast]);
+  }, [toast]); // Added handleFolderClick dependency implicitly
 
   // --- Navigation Logic ---
-  const handleFolderClick = (folderId: string) => {
+  const handleFolderClick = (folderId: string | null) => {
     setCurrentFolderId(folderId);
     setSearchQuery(''); // Reset search when changing folders
     setFilterType('all'); // Reset filter
   };
 
-  const navigateToParent = () => {
-    if (currentFolderId === null) return; // Already at root
-    const currentFolder = items.find(item => item.id === currentFolderId);
-    setCurrentFolderId(currentFolder?.parentId ?? null);
-    setSearchQuery('');
-    setFilterType('all');
+  const navigateToRoot = () => {
+    handleFolderClick(null); // Navigate to root
   };
 
 
@@ -351,11 +367,12 @@ export default function Home() {
         onFilterChange={setFilterType}
         currentFilter={filterType}
         onCreateFolder={() => setIsCreateFolderModalOpen(true)}
+        onLogoClick={navigateToRoot} // Pass navigateToRoot handler
       />
 
       <main className="flex-grow p-4 container mx-auto space-y-4">
         {isDragging && (
-          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
             <p className="text-white text-2xl font-semibold">Arraste arquivos aqui para enviar</p>
           </div>
         )}
@@ -373,6 +390,8 @@ export default function Home() {
             onRename={setItemToRename} // Pass setter to open rename modal
             onShare={setItemToShare}     // Pass setter to open share modal
             onPreview={handlePreview}   // Pass preview handler
+            isSearching={searchQuery.length > 0}
+            isFiltering={filterType !== 'all'}
           />
         ) : (
           <div className="text-center text-muted-foreground mt-10">Carregando...</div>
@@ -411,12 +430,12 @@ export default function Home() {
             altText={itemToPreview.name}
           />
        )}
-       {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && 'previewContent' in itemToPreview && (
+       {itemToPreview && isFile(itemToPreview) && (itemToPreview.fileCategory === 'code' || itemToPreview.fileCategory === 'document') && typeof itemToPreview.previewContent === 'string' && (
             <CodePreviewModal
                 isOpen={!!itemToPreview}
                 onClose={() => setItemToPreview(null)}
                 fileName={itemToPreview.name}
-                code={(itemToPreview as FileItemData & { previewContent: string }).previewContent} // Type assertion
+                code={itemToPreview.previewContent} // Use the fetched content
                 language={itemToPreview.fileCategory === 'code' ? (itemToPreview.name.split('.').pop() || 'plaintext') : 'plaintext'} // Basic language detection
             />
         )}

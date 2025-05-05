@@ -1,4 +1,5 @@
 
+
 // Define specific file categories
 export type FileCategory = 'pdf' | 'image' | 'document' | 'audio' | 'video' | 'code' | 'other';
 
@@ -15,7 +16,7 @@ export interface BaseItem {
 // Extend BaseItem for Files
 export interface FileItemData extends BaseItem {
   type: 'file';
-  url: string; // URL to view/download the file (can be blob URL or future storage URL)
+  url: string; // Data URL (or potentially other URL in the future)
   size: number; // Size in bytes
   fileCategory: FileCategory; // Specific category of the file
   uploadProgress?: number; // Optional: 0-100 for upload progress
@@ -76,12 +77,25 @@ export function determineFileCategory(file: File): FileCategory {
     if (mimeType === 'application/pdf') return 'pdf';
     if (mimeType.startsWith('audio/')) return 'audio';
     if (mimeType.startsWith('video/')) return 'video';
-    // Broader check for documents
-    if (mimeType.startsWith('text/') || mimeType.includes('document') || mimeType.includes('sheet') || mimeType.includes('presentation') || /\.(docx?|xlsx?|pptx?|txt|rtf|csv|odt|ods|odp|md)$/i.test(file.name)) return 'document';
-     // Code files
-    if (/\.(js|jsx|ts|tsx|py|html|php|css|json|java|c|cpp|cs|rb|go|swift|kt|sh|bash|sql|xml|yaml|yml|ipynb)$/i.test(file.name)) return 'code';
-    // Archives
-    if (/\.(zip|rar|tar|gz|7z)$/i.test(file.name)) return 'other'; // Consider 'archive' category
 
+    // Code files by extension (more reliable for code)
+    if (/\.(js|jsx|ts|tsx|py|java|c|cpp|cs|rb|go|swift|kt|rs|php|html|htm|css|scss|sass|less|json|xml|yaml|yml|toml|md|sh|bash|zsh|ps1|bat|sql|r|pl|lua|groovy|dart|ipynb)$/i.test(file.name)) {
+        return 'code';
+    }
+
+    // Broader check for documents based on MIME type or common extensions
+    if (mimeType.startsWith('text/') || mimeType.includes('document') || mimeType.includes('sheet') || mimeType.includes('presentation') || /\.(docx?|xlsx?|pptx?|txt|rtf|csv|odt|ods|odp)$/i.test(file.name)) {
+         // Exclude markdown from documents if it was already caught by 'code'
+         if (extension === 'md' && mimeType !== 'text/markdown') return 'code'; // Keep md as code if not specifically text/markdown
+        return 'document';
+    }
+
+    // Archives
+    if (/\.(zip|rar|tar|gz|7z|iso|img)$/i.test(file.name) || mimeType.includes('zip') || mimeType.includes('compressed')) return 'other'; // Could be 'archive' category later
+
+    // Executables / Installers
+     if (/\.(exe|app|dmg|msi|deb|rpm)$/i.test(file.name) || mimeType.includes('executable') || mimeType.includes('installer')) return 'other'; // Could be 'executable'
+
+    // Fallback
     return 'other';
 }

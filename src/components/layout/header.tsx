@@ -23,6 +23,7 @@ interface HeaderProps {
   onFilterChange: (type: FileCategory | 'folder' | 'all') => void;
   currentFilter: FileCategory | 'folder' | 'all';
   onCreateFolder: () => void; // Callback to open create folder modal
+  onLogoClick: () => void; // Callback when logo/title is clicked
 }
 
 export function Header({
@@ -31,7 +32,8 @@ export function Header({
   currentSearch,
   onFilterChange,
   currentFilter,
-  onCreateFolder
+  onCreateFolder,
+  onLogoClick
 }: HeaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
@@ -76,12 +78,16 @@ export function Header({
   const currentFilterLabel = filterOptions.find(opt => opt.value === currentFilter)?.label || 'Filtrar';
 
   return (
-    <header className="bg-card shadow-sm sticky top-0 z-10 border-b">
+    <header className="bg-card shadow-sm sticky top-0 z-30 border-b"> {/* Increased z-index */}
       <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-2">
         {/* Logo/Title */}
-        <h1 className={`text-lg font-semibold text-foreground ${isSearchVisible ? 'hidden sm:block' : ''}`}>
-          FileFlow
-        </h1>
+         <button
+            onClick={onLogoClick}
+            className={`text-lg font-semibold text-foreground hover:text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-sm p-1 -ml-1 ${isSearchVisible ? 'hidden sm:block' : ''}`}
+            aria-label="Ir para Início"
+          >
+            FileFlow
+          </button>
 
         {/* Search Input (conditionally rendered) */}
         <div className={`flex-grow ${isSearchVisible ? 'block' : 'hidden'} sm:block sm:relative sm:flex-grow-0 sm:w-64 md:w-80`}>
@@ -98,6 +104,7 @@ export function Header({
              {currentSearch && (
                  <Button variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6" onClick={() => onSearch('')}>
                     <X className="h-4 w-4"/>
+                     <span className="sr-only">Limpar pesquisa</span>
                  </Button>
              )}
            </div>
@@ -106,7 +113,7 @@ export function Header({
         {/* Action Buttons */}
         <div className="flex items-center gap-1">
           {/* Search Toggle Button (Mobile) */}
-          <Button variant="ghost" size="icon" className="sm:hidden" onClick={toggleSearch}>
+          <Button variant="ghost" size="icon" className="sm:hidden" onClick={toggleSearch} aria-label={isSearchVisible ? "Fechar pesquisa" : "Abrir pesquisa"}>
             {isSearchVisible ? <X className="h-5 w-5" /> : <Search className="h-5 w-5" />}
           </Button>
 
@@ -134,7 +141,7 @@ export function Header({
           <Button onClick={onCreateFolder} variant="outline" size="sm" className="hidden sm:inline-flex">
             <FolderPlus className="mr-2 h-4 w-4" /> Nova Pasta
           </Button>
-          <Button onClick={onCreateFolder} variant="ghost" size="icon" className="sm:hidden">
+          <Button onClick={onCreateFolder} variant="ghost" size="icon" className="sm:hidden" aria-label="Nova Pasta">
             <FolderPlus className="h-5 w-5" />
              <span className="sr-only">Nova Pasta</span>
           </Button>
@@ -144,7 +151,7 @@ export function Header({
           <Button onClick={handleUploadClick} variant="default" size="sm" className="hidden sm:inline-flex">
             <Upload className="mr-2 h-4 w-4" /> Enviar
           </Button>
-           <Button onClick={handleUploadClick} variant="ghost" size="icon" className="sm:hidden">
+           <Button onClick={handleUploadClick} variant="ghost" size="icon" className="sm:hidden" aria-label="Enviar">
             <Upload className="h-5 w-5" />
              <span className="sr-only">Enviar</span>
           </Button>
@@ -155,7 +162,7 @@ export function Header({
           ref={fileInputRef}
           onChange={handleFileChange}
           className="hidden"
-          multiple // Allow multiple file selection
+          // multiple // Keep allowing multiple if desired, but handleUpload iterates
         />
       </div>
     </header>
