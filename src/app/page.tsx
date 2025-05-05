@@ -18,12 +18,22 @@ import { CodePreviewModal } from '@/components/modals/code-preview-modal';
 const LOCAL_STORAGE_KEY = 'fileflow-items';
 
 // Helper function to convert Data URL to Blob
-const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
-  const response = await fetch(dataUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch data URL: ${response.statusText}`);
-  }
-  return response.blob();
+const dataUrlToBlob = (dataUrl: string): Blob => {
+    if (!dataUrl.startsWith('data:')) {
+        throw new Error('Invalid Data URL');
+    }
+    const parts = dataUrl.split(';base64,');
+    if (parts.length !== 2) {
+        throw new Error('Invalid Data URL format');
+    }
+    const contentType = parts[0].split(':')[1];
+    const byteCharacters = atob(parts[1]);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: contentType });
 };
 
 
@@ -97,7 +107,7 @@ export default function Home() {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             type: 'file',
-            url: dataUrl, // Use Data URL directly
+            url: dataUrl, // Store the Data URL
             size: file.size,
             fileCategory: determineFileCategory(file),
             uploadProgress: 0, // Reset progress
@@ -106,7 +116,7 @@ export default function Home() {
 
           setItems(prevItems => [...prevItems, newItem]);
 
-          // --- Mock Upload Progress (no longer needs blob URL) ---
+          // --- Mock Upload Progress ---
           let progress = 0;
           const interval = setInterval(() => {
             progress += Math.random() * 20; // Simulate progress increase
@@ -154,7 +164,7 @@ export default function Home() {
   const handleDelete = useCallback((itemId: string) => {
     const itemToDelete = items.find(item => item.id === itemId);
     if (!itemToDelete) {
-        console.warn("Item not found for deletion:", itemId);
+        console.warn("Item não encontrado para exclusão:", itemId);
         return;
     }
 
@@ -234,36 +244,42 @@ export default function Home() {
 
   // --- Preview Logic ---
   const handlePreview = useCallback(async (item: FileSystemItem) => {
-      console.log("Attempting to preview:", item); // Debug log 1
+      console.log("Tentando visualizar:", item); // Debug log 1
       if (isFile(item)) {
           if (item.isUploading) {
               toast({ title: "Aguarde", description: "O upload ainda está em andamento." });
               return;
           }
-          if (!item.url || !item.url.startsWith('data:')) {
-              toast({ title: "Erro", description: "URL do arquivo inválida ou não encontrada.", variant: "destructive" });
-              console.error("Invalid or missing URL:", item.url); // Debug log
+           // Ensure the URL is a data URL before proceeding
+           if (!item.url || !item.url.startsWith('data:')) {
+              toast({ title: "Erro", description: "URL do arquivo inválida ou não encontrada para visualização.", variant: "destructive" });
+              console.error("URL inválida ou ausente:", item.url); // Debug log
               return;
-          }
+           }
 
           try {
               if (item.fileCategory === 'image') {
-                  console.log("Setting image preview for:", item.name); // Debug log
-                  setItemToPreview(item); // Opens ImagePreviewModal
+                  console.log("Definindo visualização de imagem para:", item.name); // Debug log
+                  setItemToPreview(item); // Opens ImagePreviewModal with data URL
               } else if (['code', 'document', 'pdf'].includes(item.fileCategory)) {
-                  const blob = await dataUrlToBlob(item.url); // Use helper function
+                  const blob = dataUrlToBlob(item.url); // Convert data URL to Blob
 
                   if (item.fileCategory === 'pdf') {
-                      const pdfUrl = URL.createObjectURL(blob);
-                      window.open(pdfUrl, '_blank');
-                      // Optional: Revoke URL after some time
-                      // setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+                      const pdfUrl = URL.createObjectURL(blob); // Create temporary blob URL
+                      const pdfWindow = window.open(pdfUrl, '_blank');
+                      // Clean up the blob URL after the window is closed or after a timeout
+                       if (pdfWindow) {
+                           pdfWindow.addEventListener('beforeunload', () => URL.revokeObjectURL(pdfUrl));
+                       } else {
+                           // Fallback cleanup if window opening fails
+                           setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+                       }
                   } else { // Code or Document
                       const text = await blob.text();
-                      console.log("Setting text preview for:", item.name); // Debug log
+                      console.log("Definindo visualização de texto para:", item.name); // Debug log
                       setItemToPreview({ ...item, previewContent: text }); // Add content and open CodePreviewModal
                   }
-              } else { // Audio, Video, Other - attempt direct open/download
+              } else { // Audio, Video, Other - attempt direct open/download using the data URL
                   window.open(item.url, '_blank');
               }
           } catch (error) {
@@ -277,16 +293,17 @@ export default function Home() {
               try {
                 window.open(item.url, '_blank');
               } catch (openError) {
-                console.error("Error opening data URL directly:", openError);
+                console.error("Erro ao abrir URL de dados diretamente:", openError);
               }
           }
       } else if (isFolder(item)) {
           // Handle folder click (navigation)
           handleFolderClick(item.id);
       } else {
-          console.warn("Preview attempted on unknown item type:", item); // Debug log
+          console.warn("Tentativa de visualização em tipo de item desconhecido:", item); // Debug log
       }
   }, [toast, handleFolderClick]); // Added handleFolderClick dependency
+
 
   // --- Drag and Drop Logic ---
   const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -359,7 +376,7 @@ export default function Home() {
 
   // Debug log to check itemToPreview state changes
    useEffect(() => {
-     console.log("itemToPreview state updated:", itemToPreview);
+     console.log("Estado itemToPreview atualizado:", itemToPreview);
    }, [itemToPreview]);
 
 
@@ -439,7 +456,7 @@ export default function Home() {
             <ImagePreviewModal
                 isOpen={!!itemToPreview}
                 onClose={() => setItemToPreview(null)}
-                imageUrl={itemToPreview.url}
+                imageUrl={itemToPreview.url} // Pass the data URL
                 altText={itemToPreview.name}
             />
         )}
@@ -459,3 +476,4 @@ export default function Home() {
     </div>
   );
 }
+

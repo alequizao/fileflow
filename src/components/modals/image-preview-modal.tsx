@@ -17,7 +17,7 @@ import { useToast } from '@/hooks/use-toast'; // Import useToast
 interface ImagePreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  imageUrl: string;
+  imageUrl: string; // Expecting a Data URL here
   altText: string;
 }
 
@@ -25,17 +25,20 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
   const { toast } = useToast();
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    // Log a more specific error message including the URL that failed
-    const targetUrl = (e.target as HTMLImageElement)?.src; // Get the actual src URL from the element
-    console.error(`Error loading image for preview. Attempted URL: ${imageUrl}, Failed src: ${targetUrl}`, e);
-    toast({
-        title: "Erro ao Carregar Imagem",
-        description: "Não foi possível exibir a visualização da imagem.",
-        variant: "destructive",
-    });
-    // Consider closing the modal or showing a placeholder
-    // onClose(); // Example: Close modal on error
+      const failedUrl = (e.target as HTMLImageElement)?.src; // Get the src that failed
+      console.error(`Error loading image for preview. URL: ${failedUrl}`, e);
+      toast({
+          title: "Erro ao Carregar Imagem",
+          description: "Não foi possível exibir a visualização da imagem.",
+          variant: "destructive",
+      });
+      // Consider closing the modal or showing a placeholder
+      // onClose(); // Example: Close modal on error
   };
+
+
+  // Validate if imageUrl is a valid data URL (basic check)
+  const isValidDataUrl = typeof imageUrl === 'string' && imageUrl.startsWith('data:image/');
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -56,7 +59,7 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
         </DialogHeader>
         {/* Use a div container for centering and overflow handling */}
         <div className="p-4 flex justify-center items-center flex-grow overflow-auto">
-          {imageUrl ? (
+          {isValidDataUrl ? (
             // Use standard <img> tag for Data URLs
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -70,10 +73,11 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
                   margin: 'auto' // Center image if smaller than container
               }}
               className="rounded-md shadow-md"
+              data-ai-hint="image display" // Updated AI hint
               onError={handleImageError} // Use the specific handler
             />
           ) : (
-            <p className="text-muted-foreground">Não foi possível carregar a imagem.</p>
+            <p className="text-muted-foreground">URL da imagem inválida ou ausente.</p>
           )}
         </div>
          {/* Footer can be added if needed for actions like download */}
@@ -84,3 +88,4 @@ export function ImagePreviewModal({ isOpen, onClose, imageUrl, altText }: ImageP
     </Dialog>
   );
 }
+
