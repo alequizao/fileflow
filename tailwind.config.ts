@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -67,6 +68,7 @@ export default {
           document: 'hsl(var(--category-document))',
           audio: 'hsl(var(--category-audio))',
           video: 'hsl(var(--category-video))',
+          code: 'hsl(var(--category-code))', // Add code category
           other: 'hsl(var(--category-other))',
         }
   		},

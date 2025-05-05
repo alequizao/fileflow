@@ -1,4 +1,5 @@
-export type FileType = 'pdf' | 'image' | 'document' | 'audio' | 'video' | 'other';
+
+export type FileType = 'pdf' | 'image' | 'document' | 'audio' | 'video' | 'code' | 'other';
 
 export interface UploadedFile {
   id: string;
@@ -8,3 +9,4 @@ export interface UploadedFile {
   date: string; // Formatted date (e.g., "01/07/2024 10:30")
   type: FileType;
 }
+

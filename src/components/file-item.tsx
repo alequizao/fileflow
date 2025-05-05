@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -6,6 +7,7 @@ import {
   Image as ImageIcon,
   FileAudio,
   FileVideo,
+  FileCode2, // Import code icon
   FileArchive,
   FileQuestion,
   Download,
@@ -45,6 +47,8 @@ const getFileIcon = (file: UploadedFile, colorClass: string) => { // Pass the wh
       return <FileAudio className={commonClasses} />;
     case 'video':
       return <FileVideo className={commonClasses} />;
+    case 'code': // Add case for code
+      return <FileCode2 className={commonClasses} />;
     case 'other':
         // Basic heuristic for archives based on common extensions
       if (/\.(zip|rar|tar|gz|7z)$/i.test(file.name)) {
@@ -68,6 +72,8 @@ const getCategoryColorClass = (type: FileType): string => {
       return 'text-category-audio';
     case 'video':
       return 'text-category-video';
+    case 'code': // Add case for code
+      return 'text-category-code'; // Use code category color
     default:
       return 'text-category-other';
   }
@@ -77,21 +83,35 @@ export function FileItem({ file, onDelete }: FileItemProps) {
   const colorClass = getCategoryColorClass(file.type);
 
   // Function to handle download click
-  // This uses a temporary anchor element to trigger the download
-  // It assumes the `file.url` points to an endpoint that serves the file with correct headers OR is a Blob URL
   const handleDownload = (e: React.MouseEvent<HTMLAnchorElement>) => {
     // For non-Blob URLs or URLs pointing to an API endpoint:
     if (!file.url.startsWith('blob:')) {
         e.preventDefault(); // Prevent default link navigation only if not a blob URL
+        // Attempt to trigger download via temporary link
         const link = document.createElement('a');
-        link.href = file.url; // This should point to the API endpoint or direct file link
-        link.setAttribute('download', file.name); // This attribute prompts download
+        link.href = file.url;
+        link.setAttribute('download', file.name);
+        // Append to body, click, and remove is a common pattern
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     }
-    // For blob URLs, the default anchor behavior is sufficient for download.
-    // No e.preventDefault() needed.
+    // For blob URLs, the default anchor behavior is usually sufficient.
+    // If issues arise, you might need specific handling, but often works directly.
+  };
+
+  // Function to handle view/open click
+  const handleView = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // For specific types like code or PDF, directly opening in a new tab is often desired.
+    if (file.type === 'code' || file.type === 'pdf' || file.type === 'image' || file.url.startsWith('blob:')) {
+      // Let the default anchor behavior handle opening in a new tab
+      return;
+    }
+
+    // For other types (like documents, audio, video), downloading might be the default action,
+    // so we might want to force download instead of trying to open.
+    e.preventDefault(); // Prevent opening directly if not handled above
+    handleDownload(e); // Trigger download instead
   };
 
   return (
@@ -107,14 +127,14 @@ export function FileItem({ file, onDelete }: FileItemProps) {
         </p>
       </div>
       <div className="flex gap-1 ml-auto">
-         {/* View/Open Link - Opens in new tab */}
+         {/* View/Open Link - Opens in new tab or triggers download based on type */}
          <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:text-primary/80" asChild>
-          {/* Use file.url directly, target="_blank" opens in a new tab */}
-          <a href={file.url} target="_blank" rel="noopener noreferrer" aria-label={`Abrir ${file.name}`}>
+          {/* Use handleView to decide action, target="_blank" attempts new tab */}
+          <a href={file.url} target="_blank" rel="noopener noreferrer" onClick={handleView} aria-label={`Abrir ou baixar ${file.name}`}>
             <Eye className="h-4 w-4" />
           </a>
         </Button>
-        {/* Download Link - Triggers download via handleDownload */}
+        {/* Download Link - Always triggers download via handleDownload */}
         <Button variant="ghost" size="icon" className="h-8 w-8 text-accent hover:text-accent/80" asChild>
            {/* Use file.url for the href, onClick handles the download logic */}
            <a href={file.url} onClick={handleDownload} download={file.name} aria-label={`Baixar ${file.name}`}>

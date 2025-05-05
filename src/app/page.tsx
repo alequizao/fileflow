@@ -1,91 +1,87 @@
+
 'use client'; // Add this directive to make the component a Client Component
 
-import { useState } from 'react'; // Import useState for managing files state
+import { useState, useEffect } from 'react'; // Import useState and useEffect
 import { Header } from "@/components/layout/header";
 import { FileList } from "@/components/file-list";
 import { Footer } from "@/components/layout/footer";
-import type { UploadedFile } from "@/types/file";
+import type { UploadedFile, FileType } from "@/types/file"; // Import FileType
 import { useToast } from '@/hooks/use-toast'; // Import useToast for notifications
 
-// Mock data for demonstration purposes - move inside the component or fetch
-const initialMockFiles: UploadedFile[] = [
-    {
-    id: '1',
-    name: 'report.pdf',
-    url: '#', // Use placeholder URLs or implement download logic later
-    size: '1.2 MB',
-    date: '01/07/2024 10:30',
-    type: 'pdf',
-  },
-  {
-    id: '2',
-    name: 'logo.png',
-    url: '#',
-    size: '50 KB',
-    date: '02/07/2024 11:00',
-    type: 'image',
-  },
-   {
-    id: '3',
-    name: 'meeting_notes.docx',
-    url: '#',
-    size: '250 KB',
-    date: '03/07/2024 09:15',
-    type: 'document',
-  },
-  {
-    id: '4',
-    name: 'background_music.mp3',
-    url: '#',
-    size: '3.5 MB',
-    date: '04/07/2024 14:00',
-    type: 'audio',
-  },
-  {
-    id: '5',
-    name: 'tutorial.mp4',
-    url: '#',
-    size: '55.8 MB',
-    date: '05/07/2024 16:45',
-    type: 'video',
-  },
-   {
-    id: '6',
-    name: 'archive.zip',
-    url: '#',
-    size: '10.2 MB',
-    date: '06/07/2024 08:00',
-    type: 'other',
-  },
-];
-
+const LOCAL_STORAGE_KEY = 'fileflow-files';
 
 export default function Home() {
-  // State to hold the list of files
-  const [files, setFiles] = useState<UploadedFile[]>(initialMockFiles);
+  // State to hold the list of files, initialized lazily from localStorage or empty array
+  const [files, setFiles] = useState<UploadedFile[]>(() => {
+    // This function runs only on initial render on the client
+    if (typeof window !== 'undefined') {
+      const storedFiles = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (storedFiles) {
+        try {
+          return JSON.parse(storedFiles);
+        } catch (error) {
+          console.error("Error parsing files from local storage:", error);
+          localStorage.removeItem(LOCAL_STORAGE_KEY); // Clear corrupted data
+        }
+      }
+    }
+    return []; // Default to empty array if no localStorage or if server-rendering initially
+  });
+
   const { toast } = useToast();
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Effect to mark component as mounted (for client-side execution)
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Effect to save files to localStorage whenever the files state changes, only run on client after mount
+  useEffect(() => {
+    if (isMounted && typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(files));
+    }
+  }, [files, isMounted]);
 
   // Define handlers within the Client Component
   const handleUpload = async (file: File) => {
     console.log("Uploading file:", file.name);
     // --- Mock Upload Logic ---
     // Simulate upload delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 500)); // Shorter delay
 
-    // Create a new file entry (replace with actual data from backend)
+    // Determine file type including 'code'
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    let fileType: FileType = 'other';
+
+    if (file.type.startsWith('image/')) {
+      fileType = 'image';
+    } else if (file.type === 'application/pdf') {
+      fileType = 'pdf';
+    } else if (file.type.startsWith('audio/')) {
+      fileType = 'audio';
+    } else if (file.type.startsWith('video/')) {
+      fileType = 'video';
+    } else if (/\.(docx?|xlsx?|pptx?|txt|rtf|csv)$/i.test(file.name)) { // Expanded doc types
+       fileType = 'document';
+    } else if (/\.(js|jsx|ts|tsx|py|html|php|css|json|md|java|c|cpp|cs|rb|go|swift|kt)$/i.test(file.name)) { // Expanded code types
+       fileType = 'code';
+    }
+    // Keep 'other' for archives etc. (or specific types if needed)
+    else if (/\.(zip|rar|tar|gz|7z)$/i.test(file.name)) {
+        fileType = 'other';
+    }
+
+    // Create a new file entry
     const newFile: UploadedFile = {
       id: String(Date.now()), // Simple unique ID generation
       name: file.name,
-      url: URL.createObjectURL(file), // Temporary URL for viewing/downloading mock
-      size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+      // Create a Blob URL for preview/download in this mock setup
+      // In a real app, this would likely be a URL from your storage service
+      url: URL.createObjectURL(file),
+      size: `${(file.size / (file.size > 1024 * 1024 ? 1024 * 1024 : 1024)).toFixed(file.size > 1024 * 1024 ? 2 : 0)} ${file.size > 1024 * 1024 ? 'MB' : 'KB'}`, // Dynamic KB/MB
       date: new Date().toLocaleString('pt-BR'),
-      // Basic type detection based on extension (improve as needed)
-      type: file.type.startsWith('image/') ? 'image' :
-            file.type === 'application/pdf' ? 'pdf' :
-            file.type.startsWith('audio/') ? 'audio' :
-            file.type.startsWith('video/') ? 'video' :
-            file.name.endsWith('.docx') || file.name.endsWith('.doc') ? 'document' :
-            'other',
+      type: fileType, // Assign determined type
     };
 
     // Add the new file to the list
@@ -93,49 +89,43 @@ export default function Home() {
 
     toast({
       title: "Upload Concluído",
-      description: `Arquivo "${file.name}" enviado com sucesso.`,
-      variant: "default", // Use 'default' or 'success' if you have it
+      description: `Arquivo "${file.name}" adicionado.`,
+      variant: "default",
     });
     // --- End Mock Upload Logic ---
 
-    // In a real app:
-    // const formData = new FormData();
-    // formData.append('file', file);
-    // try {
-    //   const response = await fetch('/api/upload', { method: 'POST', body: formData });
-    //   if (!response.ok) throw new Error('Upload failed');
-    //   const uploadedFileData = await response.json(); // Assuming API returns new file details
-    //   setFiles(prevFiles => [uploadedFileData, ...prevFiles]); // Add file from API response
-    //   toast({ title: "Upload Concluído", description: `Arquivo "${file.name}" enviado.` });
-    // } catch (error) {
-    //   console.error("Upload error:", error);
-    //   toast({ title: "Erro no Upload", description: `Falha ao enviar "${file.name}".`, variant: "destructive" });
-    // }
+    // In a real app (example):
+    // 1. Upload file to storage (e.g., Firebase Storage, S3)
+    // 2. Get the download URL.
+    // 3. Save file metadata (including URL) to a database (e.g., Firestore).
+    // 4. Update the local state `files` with data from the database.
   };
 
   const handleDelete = async (fileId: string) => {
     console.log("Deleting file:", fileId);
+    const fileToDelete = files.find(f => f.id === fileId);
+    if (!fileToDelete) return;
+
     // --- Mock Deletion Logic ---
-    const fileName = files.find(f => f.id === fileId)?.name || 'Arquivo';
+    const fileName = fileToDelete.name;
+
+    // Revoke the Blob URL if it exists to free memory
+    if (fileToDelete.url.startsWith('blob:')) {
+      URL.revokeObjectURL(fileToDelete.url);
+    }
+
     setFiles(prevFiles => prevFiles.filter(file => file.id !== fileId));
     toast({
       title: "Exclusão Concluída",
       description: `"${fileName}" excluído com sucesso.`,
-      variant: "default",
+      variant: "default", // Or maybe "destructive" look? Default is fine.
     });
     // --- End Mock Deletion Logic ---
 
-    // In a real app:
-    // const fileName = files.find(f => f.id === fileId)?.name || 'Arquivo';
-    // try {
-    //   const response = await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
-    //   if (!response.ok) throw new Error('Deletion failed');
-    //   setFiles(prevFiles => prevFiles.filter(file => file.id !== fileId));
-    //   toast({ title: "Exclusão Concluída", description: `"${fileName}" excluído.` });
-    // } catch (error) {
-    //   console.error("Deletion error:", error);
-    //   toast({ title: "Erro na Exclusão", description: `Falha ao excluir "${fileName}".`, variant: "destructive" });
-    // }
+    // In a real app (example):
+    // 1. Delete file from storage.
+    // 2. Delete file metadata from database.
+    // 3. Update local state `files`.
   };
 
 
@@ -144,9 +134,16 @@ export default function Home() {
       {/* Pass handlers down to Client Components */}
       <Header onUpload={handleUpload} />
       <main className="flex-grow p-4 space-y-4 container mx-auto">
-        <FileList files={files} onDelete={handleDelete} />
+        {/* Only render FileList on the client after mount to ensure localStorage is read */}
+        {isMounted ? (
+          <FileList files={files} onDelete={handleDelete} />
+        ) : (
+          // Optional: Add a loading indicator while waiting for client mount
+          <div className="text-center text-muted-foreground mt-10">Carregando arquivos...</div>
+        )}
       </main>
       <Footer />
     </div>
   );
 }
+

@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -42,6 +43,7 @@ body {
     --category-document: 240 100% 50%; /* Blue */
     --category-audio: 60 100% 50%; /* Yellow */
     --category-video: 300 100% 50%; /* Magenta */
+    --category-code: 210 100% 50%; /* Indigo/Purple */
     --category-other: 0 0% 50%; /* Gray */
   }
 
@@ -79,6 +81,7 @@ body {
     --category-document: 240 100% 60%;
     --category-audio: 60 100% 60%;
     --category-video: 300 100% 60%;
+    --category-code: 210 100% 65%; /* Lighter Indigo/Purple */
     --category-other: 0 0% 60%;
   }
 }
@@ -92,3 +95,4 @@ body {
     min-height: 100vh;
   }
 }
+
